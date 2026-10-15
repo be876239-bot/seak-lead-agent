@@ -1,6 +1,6 @@
 import Dexie from 'dexie';
 import type {
-  Analysis, Batch, Comment, Feedback, Job, Note, Product, ProductProfile, Usage,
+  Analysis, Batch, Comment, Feedback, Job, LeadState, Note, Product, ProductProfile, Usage,
 } from '../domain/schemas';
 import { AppError } from '../domain/errors';
 import type { SeekLeadDb } from './db';
@@ -54,14 +54,26 @@ export class Repositories {
     return this.replaceProfile(id, upsertProfileClaims(existing.profile, edited));
   }
 
-  async deleteProduct(id: string): Promise<void> {
-    await this.db.transaction('rw', [this.db.products, this.db.analyses, this.db.leadStates, this.db.feedback], async () => {
+  async deleteProduct(id: string): Promise<void> {    await this.db.transaction('rw', [this.db.products, this.db.analyses, this.db.leadStates, this.db.feedback], async () => {
       // analyses 无单列 productId 索引，用复合索引范围删除；feedback 同理走扫描（MVP 数据量小）
       await this.db.analyses.where('[productId+commentKey]').between([id, Dexie.minKey], [id, Dexie.maxKey]).delete();
       await this.db.leadStates.where('productId').equals(id).delete();
       const fbIds = (await this.db.feedback.toArray()).filter((f) => f.productId === id).map((f) => f.id);
       await this.db.feedback.bulkDelete(fbIds);
       await this.db.products.delete(id);
+    });
+  }
+
+  /** 清除全部业务数据（不含 Key——Key 在 storage.local/session，单独清除入口）。 */
+  async clearAllBusinessData(): Promise<void> {
+    await this.db.transaction('rw', [
+      this.db.products, this.db.notes, this.db.comments, this.db.analyses,
+      this.db.leadStates, this.db.feedback, this.db.jobs, this.db.batches, this.db.usage,
+    ], async () => {
+      await Promise.all([
+        this.db.products.clear(), this.db.notes.clear(), this.db.comments.clear(), this.db.analyses.clear(),
+        this.db.leadStates.clear(), this.db.feedback.clear(), this.db.jobs.clear(), this.db.batches.clear(), this.db.usage.clear(),
+      ]);
     });
   }
 
@@ -170,6 +182,40 @@ export class Repositories {
       .between([productId, Dexie.minKey], [productId, Dexie.maxKey])
       .toArray();
     return rows;
+  }
+
+  // ---- 面板只读查询（T23–T25） ----
+  async listProducts(): Promise<Product[]> {
+    const rows = await this.db.products.toArray();
+    return rows.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  }
+
+  async commentsForNote(noteKey: string): Promise<Comment[]> {
+    return this.db.comments.where('noteKey').equals(noteKey).toArray();
+  }
+
+  async analysesFor(productId: string, commentKeys: readonly string[]): Promise<Analysis[]> {
+    if (!commentKeys.length) return [];
+    return this.db.analyses.where('[productId+commentKey]')
+      .anyOf([...commentKeys].map((k) => [productId, k] as [string, string]))
+      .toArray();
+  }
+
+  async feedbackForProduct(productId: string): Promise<Feedback[]> {
+    // feedback 无 productId 索引（MVP 数据量小，全表扫描）
+    return (await this.db.feedback.toArray()).filter((f) => f.productId === productId);
+  }
+
+  async leadStatesForProduct(productId: string): Promise<LeadState[]> {
+    return this.db.leadStates.where('productId').equals(productId).toArray();
+  }
+
+  async usageForJob(jobId: string): Promise<Usage[]> {
+    return this.db.usage.where('jobId').equals(jobId).toArray();
+  }
+
+  async allUsage(): Promise<Usage[]> {
+    return this.db.usage.toArray();
   }
 
   // ---- locks（T19 使用；接口在此定义并测试） ----

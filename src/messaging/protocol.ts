@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { ERROR_CODES, type ErrorCode } from '../domain/errors';
-import { CommentSchema, NoteSchema, ProductSourceBlockSchema } from '../domain/schemas';
+import { BatchSchema, CommentSchema, JobSchema, NoteSchema, ProductSourceBlockSchema } from '../domain/schemas';
 import { LIMITS } from '../domain/limits';
 
 export const PROTOCOL_VERSION = 1;
@@ -12,6 +12,11 @@ export const MessageType = z.enum([
   'XHS_STOP_SESSION',
   'PRODUCT_READ_RENDERED',
   'PRODUCT_CANCEL_READ',
+  'PRODUCT_CREATE',
+  'NOTE_ANALYZE',
+  'JOB_GET',
+  'JOB_CANCEL',
+  'JOB_RETRY',
 ]);
 export type MessageType = z.infer<typeof MessageType>;
 
@@ -37,6 +42,29 @@ export const RequestSchema = z.discriminatedUnion('type', [
   }),
   z.object({
     protocol: z.literal(PROTOCOL_VERSION), requestId: RequestId, type: z.literal('PRODUCT_CANCEL_READ'),
+    payload: z.object({ jobId: z.string().uuid() }),
+  }),
+  z.object({
+    protocol: z.literal(PROTOCOL_VERSION), requestId: RequestId, type: z.literal('PRODUCT_CREATE'),
+    payload: z.object({
+      jobId: z.string().uuid(), url: z.string().url().max(LIMITS.maxUrlChars),
+      existingProductId: z.string().uuid().optional(),
+    }),
+  }),
+  z.object({
+    protocol: z.literal(PROTOCOL_VERSION), requestId: RequestId, type: z.literal('NOTE_ANALYZE'),
+    payload: z.object({ jobId: z.string().uuid(), tabId: z.number().int().nonnegative(), productId: z.string().uuid() }),
+  }),
+  z.object({
+    protocol: z.literal(PROTOCOL_VERSION), requestId: RequestId, type: z.literal('JOB_GET'),
+    payload: z.object({ jobId: z.string().uuid() }),
+  }),
+  z.object({
+    protocol: z.literal(PROTOCOL_VERSION), requestId: RequestId, type: z.literal('JOB_CANCEL'),
+    payload: z.object({ jobId: z.string().uuid() }),
+  }),
+  z.object({
+    protocol: z.literal(PROTOCOL_VERSION), requestId: RequestId, type: z.literal('JOB_RETRY'),
     payload: z.object({ jobId: z.string().uuid() }),
   }),
 ]);
@@ -70,6 +98,12 @@ export const ProductReadRenderedPayload = z.object({
   truncated: z.boolean(),
   pendingOrigin: z.string().max(LIMITS.maxUrlChars).nullable(),
 });
+
+export const JobGetPayload = z.object({
+  job: JobSchema.nullable(),
+  batches: z.array(BatchSchema).max(LIMITS.maxSessionComments),
+});
+export type JobGetPayload = z.infer<typeof JobGetPayload>;
 
 export const ResponseErrorSchema = z.object({
   code: z.enum(ERROR_CODES),

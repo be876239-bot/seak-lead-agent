@@ -87,6 +87,13 @@ export class TaskLockManager {
     await this.repos.releaseLock(handle.name, handle.ownerId, handle.generation);
   }
 
+  findHandleByJob(jobId: string): LockHandle | null {
+    for (const entry of this.entries.values()) {
+      if (!entry.lost && entry.handle.jobId === jobId) return entry.handle;
+    }
+    return null;
+  }
+
   /** 启动恢复：把上次进程遗留的 collecting/analyzing 任务标 interrupted，清过期锁。不依赖 unload。 */
   async recoverInterrupted(): Promise<string[]> {
     return this.repos.markInterruptedOnRecovery();

@@ -282,31 +282,41 @@ function jobFinalStatus(outcome: Outcome, rows: Batch[]): { status: Job['status'
 
 export async function runCommentsJob(
   deps: RunnerDeps,
-  spec: { productId: string; note: Note; comments: Comment[]; onProgress?: (p: ProgressInfo) => void },
+  spec: { productId: string; note: Note; comments: Comment[]; jobId?: string; tabId?: number | null; onProgress?: (p: ProgressInfo) => void },
 ): Promise<Job> {
-  const product = await deps.repos.getProduct(spec.productId);
-  if (!product) throw new AppError('STORAGE_ERROR', '产品不存在');
-  const comments = dedupeComments(spec.comments);
-  for (const c of comments) {
-    if (c.noteKey !== spec.note.noteKey) throw new AppError('PAGE_CHANGED', '评论与笔记不匹配，拒绝把旧快照写入新笔记');
-  }
+  const jobId = spec.jobId ?? crypto.randomUUID();
+  const job: Job = {
+    id: jobId, kind: 'comments', status: 'created', ownerId: '', generation: 0,
+    productId: spec.productId, profileVersion: null, tabId: spec.tabId ?? null, noteKey: spec.note.noteKey,
+    provider: deps.providerName, modelId: deps.modelId, promptVersion: COMMENT_PROMPT_VERSION,
+    totalItems: 0, completedItems: 0, failedItems: 0,
+    createdAt: nowIso(), updatedAt: nowIso(), errorCode: null,
+  };
+  // Job 行先建后跑：面板随时可轮询到 created/failed，锁冲突也留痕
+  if (await deps.repos.getJob(jobId)) await deps.repos.updateJob(jobId, job);
+  else await deps.repos.createJob(job);
 
-  const jobId = crypto.randomUUID();
-  const handle = await deps.lock.acquire(LOCK_NAME, jobId);
+  let handle: LockHandle | null = null;
   try {
+    const product = await deps.repos.getProduct(spec.productId);
+    if (!product) throw new AppError('STORAGE_ERROR', '产品不存在');
+    const comments = dedupeComments(spec.comments);
+    for (const c of comments) {
+      if (c.noteKey !== spec.note.noteKey) throw new AppError('PAGE_CHANGED', '评论与笔记不匹配，拒绝把旧快照写入新笔记');
+    }
+    handle = await deps.lock.acquire(LOCK_NAME, jobId);
+
     const { candidates, parentLookup } = buildCandidates(deps, product, spec.note, comments);
     const existing = await deps.repos.existingCacheKeys(candidates.map((c) => c.cacheKey));
     const uncached = filterUncached(existing, candidates);
     const batches = planCommentBatches(uncached, parentLookup, product.profile, spec.note);
 
-    const job: Job = {
-      id: jobId, kind: 'comments', status: 'analyzing', ownerId: handle.ownerId, generation: handle.generation,
-      productId: product.id, profileVersion: product.profileVersion, tabId: null, noteKey: spec.note.noteKey,
-      provider: deps.providerName, modelId: deps.modelId, promptVersion: COMMENT_PROMPT_VERSION,
-      totalItems: uncached.length, completedItems: 0, failedItems: 0,
-      createdAt: nowIso(), updatedAt: nowIso(), errorCode: null,
-    };
-    await deps.repos.createJob(job);
+    await deps.repos.updateJob(jobId, {
+      status: 'analyzing', ownerId: handle.ownerId, generation: handle.generation,
+      profileVersion: product.profileVersion, totalItems: uncached.length,
+    });
+    job.status = 'analyzing'; job.ownerId = handle.ownerId; job.generation = handle.generation;
+    job.profileVersion = product.profileVersion; job.totalItems = uncached.length;
 
     const rows: Batch[] = batches.map((b, i) => ({
       id: crypto.randomUUID(), jobId, index: i, status: 'pending',
@@ -326,8 +336,13 @@ export async function runCommentsJob(
       completedItems: outcome.completedItems, failedItems: outcome.failedItems,
     });
     return { ...job, status: fin.status, errorCode: fin.errorCode, completedItems: outcome.completedItems, failedItems: outcome.failedItems };
+  } catch (err) {
+    const e = ensureAppError(err);
+    const status: Job['status'] = e.code === 'CANCELLED' ? 'cancelled' : 'failed';
+    await deps.repos.updateJob(jobId, { status, errorCode: e.code });
+    throw e;
   } finally {
-    await deps.lock.release(handle);
+    if (handle) await deps.lock.release(handle);
   }
 }
 
@@ -380,22 +395,26 @@ export async function retryCommentsJob(
 /** 产品画像生成（T10）：来源块 → DTO → 模型 → 校验（修复一次）→ 保存。 */
 export async function runProfileGeneration(
   deps: RunnerDeps,
-  spec: { inputUrl: string; finalUrl: string; blocks: ProductSourceBlock[]; existingProductId?: string },
+  spec: { inputUrl: string; finalUrl: string; blocks: ProductSourceBlock[]; existingProductId?: string; jobId?: string },
 ): Promise<Product> {
-  const jobId = crypto.randomUUID();
-  const handle = await deps.lock.acquire(LOCK_NAME, jobId);
-  const mk = mkUsage({ jobId, batchId: null, deps });
+  const jobId = spec.jobId ?? crypto.randomUUID();
   const job: Job = {
-    id: jobId, kind: 'product', status: 'analyzing', ownerId: handle.ownerId, generation: handle.generation,
+    id: jobId, kind: 'product', status: 'created', ownerId: '', generation: 0,
     productId: spec.existingProductId ?? null, profileVersion: null, tabId: null, noteKey: null,
     provider: deps.providerName, modelId: deps.modelId, promptVersion: PROFILE_PROMPT_VERSION,
     totalItems: 1, completedItems: 0, failedItems: 0,
     createdAt: nowIso(), updatedAt: nowIso(), errorCode: null,
   };
-  await deps.repos.createJob(job);
-  const input: ProfileInput = buildProfileInput(spec.blocks.map((b) => ({ id: b.id, text: b.text })));
+  if (await deps.repos.getJob(jobId)) await deps.repos.updateJob(jobId, job);
+  else await deps.repos.createJob(job);
+  const mk = mkUsage({ jobId, batchId: null, deps });
 
+  let handle: LockHandle | null = null;
   try {
+    handle = await deps.lock.acquire(LOCK_NAME, jobId);
+    await deps.repos.updateJob(jobId, { status: 'analyzing', ownerId: handle.ownerId, generation: handle.generation });
+    const input: ProfileInput = buildProfileInput(spec.blocks.map((b) => ({ id: b.id, text: b.text })));
+
     let profile!: ProductProfile;
     let resp!: AIResponse;
     let attemptIndex = 0;
@@ -455,6 +474,6 @@ export async function runProfileGeneration(
     await deps.repos.updateJob(jobId, { status, errorCode: e.code, failedItems: 1 });
     throw e;
   } finally {
-    await deps.lock.release(handle);
+    if (handle) await deps.lock.release(handle);
   }
 }

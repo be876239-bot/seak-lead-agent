@@ -180,7 +180,7 @@ describe('G2 mock 端到端闭环（产品→当前页→分析→保存→再�
     expect((await db.analyses.toArray()).length).toBe(26);
   });
 
-  it('并发互斥：另一面板持锁时新任务报 LOCK_HELD 且不留 Job 记录', async () => {
+  it('并发互斥：另一面板持锁时新任务报 LOCK_HELD，Job 行留痕为 failed', async () => {
     const provider = new MockProvider({ profile: profileScript, classification: goldClassification });
     const product = await makeProduct(provider);
     const snap = await captureFromFixture();
@@ -188,7 +188,11 @@ describe('G2 mock 端到端闭环（产品→当前页→分析→保存→再�
     const blocker = await other.acquire(LOCK_NAME, crypto.randomUUID());
     await expect(runCommentsJob(deps(provider), { productId: product.id, note: snap.note!, comments: snap.comments }))
       .rejects.toMatchObject({ code: 'LOCK_HELD' });
-    expect((await db.jobs.toArray()).length).toBe(1); // 仅画像任务
+    const allJobs = await db.jobs.toArray();
+    expect(allJobs.length).toBe(2); // 画像任务 + 本次留痕的失败任务
+    const blocked = allJobs.find((j) => j.kind === 'comments')!;
+    expect(blocked.status).toBe('failed');
+    expect(blocked.errorCode).toBe('LOCK_HELD');
     await other.release(blocker);
     const ok = await runCommentsJob(deps(provider), { productId: product.id, note: snap.note!, comments: snap.comments });
     expect(ok.status).toBe('completed');

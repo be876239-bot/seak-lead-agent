@@ -2,7 +2,7 @@
 
 创建：2026-10-15。配套规范：`DEVELOPMENT.md`。
 
-**当前状态：G0、G1 已完成（T01–T09、T11–T14）；G2 已完成（T15–T21、G2 检查通过、T22 数据层完成，T10 画像数据层随 T21 落地；T22 用量 UI 与 T23+ 界面归 M3）。真实浏览器验收（T28–T33）尚未开始。**
+**当前状态：G0、G1 已完成（T01–T09、T11–T14）；G2 已完成（T15–T21、G2 检查通过、T22 数据层完成，T10 画像数据层随 T21 落地）；M3 代码与自动化验证完成（T22 用量 UI、T23–T27：后台任务协调器、四页 UI、保留期清理、JSON/CSV 导出；187 项测试/typecheck/lint/build 全绿），真实侧边栏 UI 操作验收归 T29。真实浏览器验收（T28–T33）尚未开始。**
 
 ## 给接手 AI 的执行指令
 
@@ -502,6 +502,7 @@ G3 检查：
 | 2026-10-15 | T20 | 完成 | ai/batching.ts planCommentBatches：≤15 条/批且评论文本 ≤12,000 字符、父评论文本计入批次开销、单条超限截断标 truncated、不丢弃任何候选（无关键词过滤）；analysis/cache.ts filterUncached 先查缓存（无新评论 0 批=不调 AI）；ai-payload.ts 提取 classificationOverheadChars 与 DTO 计数同源，runner 以 overhead+批字数为预算保证规划条目全部进入；tests/unit/batching.test.ts 8 项通过（含 DTO 一致性、画像版本变化经 cacheKey 成分失效在 e2e 验证） | 真实模型上下文上限核验归 T30 |
 | 2026-10-15 | T21 | 完成 | analysis/runner.ts：runCommentsJob（锁→缓存过滤→批次持久化→逐批 采集后打码文本 DTO→classify→validate→repair(1)/retryable(1)→group-v1→commitBatch 事务；并发 1；换帖守卫 PAGE_CHANGED；cancelled/partial/failed/completed/interrupted 状态机）、retryCommentsJob 仅重跑 failed/interrupted 批（e2e 断言第 1 批绝不重跑）、runProfileGeneration（T10 数据层：buildProfileInput→validateProfileOutput→createProduct/replaceProfile 版本递增）；progress 回调供 UI；provider 接口增 RepairTurn（appendRepair 带坏输出、仅一次）；repositories 增 getJob/getNote/getProduct/getComments/batchesForJob/existingCacheKeys/addUsage/analysesForProduct，修正 deleteProduct/analyses 查询走复合索引；tests/integration/analysis-e2e.test.ts 8 项通过 | UI 进度呈现归 T23/T26；真实百炼端到端归 T30；后台消息接线（面板触发 runner）归 T23 |
 | 2026-10-15 | T22（数据层） | 部分完成 | Usage 表增 providerRequestId；runner 落真实 model/token（供应商缺失记 null）、durationMs、attemptIndex、请求 ID（若提供）；estimatedCny/priceVerifiedAt 保持 null（配置单价属 UI）；失败/无效输出尝试即时写 status failed/unknown（AI 可能已计费如实记录），重开面板不重复累计=读已存 usage（UI 侧待做）；ai/factory.ts getProvider 缺 Key AI_AUTH 不回退 mock + 单测 2 项 | 单价配置、用量组件与取消计费提示 UI 归 T25/T26；"不重复累计"需 UI 联调验收 |
+| 2026-10-16 | T22（用量 UI）+T23–T27（M3 开发） | 部分完成（自动化验证通过） | 后台协调器 src/analysis/jobs.ts：PRODUCT_CREATE/NOTE_ANALYZE/JOB_GET/JOB_CANCEL/JOB_RETRY 注册为敏感命令（isTrustedSender），面板 client.ts sendRequest；runner 两入口改 jobId 先行（created 行先落库、LOCK_HELD 也留痕 failed，e2e 并发断言更新）；锁增 findHandleByJob 供取消；src/xhs/capture.ts 采集编排 STATUS→START→cursor 翻页→STOP（单测 5：翻页汇总/中途报错仍 STOP/blocked/unsupported/标签页不可达）；Products.tsx（贴链接→阶段提示→取消→事实/推断/未知+证据→选中/删除/版本显示、类别未知低完整度提示）；CurrentNote.tsx（"已读取 N 条已加载评论（非全部评论）"、不自动开始 AI、按钮 busy 禁用不重复建任务、重开面板按 storage 记录恢复轮询、旧帖换帖提示、四组结果+证据+意向对象+模型/人工来源+已处理、失败批 JOB_RETRY、限流/遮挡/无产品/非笔记页状态齐全）；Leads.tsx（分组/处理/关键词过滤、纠正弹窗写 Feedback 不改模型原判、safeExternalUrl 原帖链接不自动打开、空结果解释、JSON/CSV 导出当前筛选）；Settings.tsx：Key 区保留+连接测试（用户触发的最小 chat 请求）、保留期 7/30/90 默认 30 存 storage.local、立即清理带确认（取消不改数据、活跃任务先拒绝）、启动+每日首次自动清理（retention.ts 级联无孤立、leadStates 保留、集成测试 5）、用量汇总（token 未回报明确未知不冒充；单价+核验日期齐备才估价）+失败/取消可能已计费提示、清除 Key 与清除业务数据分离入口；ui/logic.ts 纯函数（buildLeadGroups/profileUnknownLabels/jobPhaseLabel/summarizeUsage/estimateCny/safeExternalUrl）单测 9；export csv.ts UTF-8 BOM+公式注入（=+-@ 与前置空白/Tab）+引号换行转义、json.ts schemaVersion+profileVersion 且无 Key/昵称/sourceBlocks（单测 5）；pnpm typecheck/lint/build 全绿，187 项测试通过 | 真实浏览器侧边栏操作流（点击、确认弹窗、下载、双面板互斥 UI 表现）归 T29；真实模型效果归 T30 |
 
 ## 任务状态更新
 

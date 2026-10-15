@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';
-import {
-  PROVIDER_PRESETS, clearCredential, loadCredential, saveCredential, type PresetId,
-} from '../../src/storage/credentials';
-import { requestProviderOrigin } from '../../src/messaging/handlers';
+import { useState } from 'react';
+import Products from './Products';
+import CurrentNote from './CurrentNote';
+import Leads from './Leads';
+import Settings from './Settings';
 
 type Tab = 'products' | 'note' | 'leads' | 'settings';
 
@@ -12,71 +12,6 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'leads', label: '线索' },
   { id: 'settings', label: '设置' },
 ];
-
-function Settings() {
-  const [presetId] = useState<PresetId>('bailian');
-  const [model, setModel] = useState(PROVIDER_PRESETS[presetId].defaultModel);
-  const [apiKey, setApiKey] = useState('');
-  const [remember, setRemember] = useState(false);
-  const [status, setStatus] = useState('');
-
-  useEffect(() => {
-    loadCredential().then((cred) => {
-      if (cred) {
-        setModel(cred.model);
-        setRemember(cred.remember);
-        setApiKey(cred.apiKey);
-        setStatus(`已加载 Key（${cred.remember ? '本地记住' : '仅本会话'}）`);
-      }
-    });
-  }, []);
-
-  return (
-    <div style={{ display: 'grid', gap: 10, fontSize: 13 }}>
-      <p>{PROVIDER_PRESETS[presetId].label}</p>
-      <label>
-        模型名称
-        <input value={model} onChange={(e) => setModel(e.target.value)} style={{ width: '100%' }} />
-      </label>
-      <label>
-        API Key
-        <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} style={{ width: '100%' }} />
-      </label>
-      <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-        <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
-        在此浏览器记住 Key（不勾选则仅当前会话有效）
-      </label>
-      <div style={{ display: 'flex', gap: 8 }}>
-        <button
-          onClick={async () => {
-            if (!apiKey.trim()) { setStatus('请先输入 Key'); return; }
-            await saveCredential({ presetId, apiKey: apiKey.trim(), model: model.trim(), remember });
-            setStatus(`已保存（${remember ? 'storage.local' : 'storage.session'}）`);
-          }}
-        >
-          保存
-        </button>
-        <button
-          onClick={async () => {
-            await clearCredential();
-            setApiKey('');
-            setStatus('已清除 Key');
-          }}
-        >
-          清除 Key
-        </button>
-        <button onClick={async () => {
-          const ok = await requestProviderOrigin(presetId);
-          setStatus(ok ? '已授权供应商域名' : '授权被拒绝：分析将无法发起 API 请求');
-        }}>
-          授权模型域名
-        </button>
-      </div>
-      <p role="status">{status}</p>
-      <p style={{ color: '#888' }}>Key 绝不进入同步存储、数据库、导出文件或日志。</p>
-    </div>
-  );
-}
 
 export default function App() {
   const [tab, setTab] = useState<Tab>('products');
@@ -91,9 +26,10 @@ export default function App() {
           </button>
         ))}
       </nav>
-      {tab === 'settings'
-        ? <Settings />
-        : <p style={{ color: '#777' }}>{TABS.find((t) => t.id === tab)?.label}：功能开发中（见 TODO.md）。</p>}
+      {tab === 'settings' && <Settings />}
+      {tab === 'products' && <Products />}
+      {tab === 'note' && <CurrentNote />}
+      {tab === 'leads' && <Leads />}
     </div>
   );
 }

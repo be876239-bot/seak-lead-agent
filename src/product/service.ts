@@ -80,8 +80,26 @@ function findSupplementLinks(html: string, baseUrl: string): string[] {
   return out.slice(0, 2);
 }
 
+/** 渲染兜底读取：面板经消息走后台；后台协调器直接注入本地实现（不能给自己发消息）。 */
+export type RenderReaderFn = (jobId: string, url: string) => Promise<{
+  finalUrl: string; blocks: ProductSourceBlock[]; truncated: boolean; degraded?: boolean;
+}>;
+
+const messageRenderReader: RenderReaderFn = async (jobId, url) => {
+  const res = await browser.runtime.sendMessage({
+    protocol: 1, requestId: crypto.randomUUID(), type: 'PRODUCT_READ_RENDERED', payload: { jobId, url },
+  });
+  if (!res?.ok) {
+    const e = res?.error;
+    throw new AppError(e?.code ?? 'PAGE_UNREACHABLE', e?.message ?? '渲染读取失败', true);
+  }
+  return res.data;
+};
+
 /** 侧边栏编排：静态优先 → 渲染兜底 → 同域补读（最多 2 页）。 */
-export async function collectProductSources(rawUrl: string, jobId: string, signal?: AbortSignal): Promise<ProductSourcesResult> {
+export async function collectProductSources(
+  rawUrl: string, jobId: string, signal?: AbortSignal, renderReader: RenderReaderFn = messageRenderReader,
+): Promise<ProductSourcesResult> {
   const { url } = parseProductUrl(rawUrl);
   const granted = await browser.permissions.contains({ origins: [url.origin + '/*'] });
   if (!granted) throw new AppError('PERMISSION_DENIED', '请先在弹窗中授权该域名');
@@ -108,20 +126,11 @@ export async function collectProductSources(rawUrl: string, jobId: string, signa
   }
 
   if (needsRender) {
-    const res = await browser.runtime.sendMessage({
-      protocol: 1,
-      requestId: crypto.randomUUID(),
-      type: 'PRODUCT_READ_RENDERED',
-      payload: { jobId, url: finalUrl },
-    });
-    if (!res?.ok) {
-      const e = res?.error;
-      throw new AppError(e?.code ?? 'PAGE_UNREACHABLE', e?.message ?? '渲染读取失败', true);
-    }
-    finalUrl = res.data.finalUrl ?? finalUrl;
-    blocks = res.data.blocks;
-    truncated = res.data.truncated;
-    degraded = res.data.degraded ?? false;
+    const res = await renderReader(jobId, finalUrl);
+    finalUrl = res.finalUrl || finalUrl;
+    blocks = res.blocks;
+    truncated = res.truncated;
+    degraded = res.degraded ?? false;
     renderUsed = true;
   }
 
