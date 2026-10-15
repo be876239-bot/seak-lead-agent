@@ -74,8 +74,16 @@ export function buildCommentMessages(input: ClassificationInput): ChatMessage[] 
   ];
 }
 
-/** 格式修复：只回传错误摘要与原始数据引用，不重发正文内容之外信息，仍受预算与取消控制。 */
-export function buildRepairMessages(original: ChatMessage[], errorSummary: string): ChatMessage[] {
-  return [...original, { role: 'user', content: `上一次的输出不符合要求：${errorSummary}
-请仅修正输出格式后重新返回完整 JSON，仍然只返回 JSON。` }];
+/** 格式修复：回传坏输出与错误摘要，仅要求改格式，不追加新数据；仍受预算与取消控制。 */
+export function appendRepair(
+  original: ChatMessage[],
+  errorSummary: string,
+  badOutput: string,
+): ChatMessage[] {
+  return [
+    ...original,
+    { role: 'assistant', content: badOutput.slice(0, 8000) },
+    { role: 'user', content: `上一次的输出不符合要求：${errorSummary}
+请仅修正输出格式后重新返回完整 JSON，仍然只返回 JSON。` },
+  ];
 }

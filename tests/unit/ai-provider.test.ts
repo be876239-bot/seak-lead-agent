@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { AppError } from '../../src/domain/errors';
 import { BailianProvider, stripCodeFence } from '../../src/ai/bailian';
 import { MockProvider } from '../../src/ai/mock';
 import { COMMENT_SYSTEM_PROMPT, buildCommentMessages, buildProfileMessages } from '../../src/ai/prompts';
@@ -148,5 +149,25 @@ describe('提示词组装', () => {
   it('profile 输入整体序列化进 user 消息', () => {
     const msgs = buildProfileMessages(profileInput);
     expect(JSON.parse(msgs[1]!.content).blocks[0].id).toBe('b01');
+  });
+});
+
+describe('getProvider 工厂（mock/生产隔离）', () => {
+  it('缺 Key 报 AI_AUTH，不回退 mock', async () => {
+    const { getProvider } = await import('../../src/ai/factory');
+    let caught: unknown;
+    try {
+      getProvider({ apiKey: '', baseUrl: 'https://x.invalid/v1', model: 'm' });
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(AppError);
+    expect((caught as AppError).code).toBe('AI_AUTH');
+  });
+
+  it('有 Key 返回 BailianProvider（真实装配路径，无 mock 混入）', async () => {
+    const { getProvider } = await import('../../src/ai/factory');
+    const p = getProvider(cfg);
+    expect(p).toBeInstanceOf(BailianProvider);
   });
 });

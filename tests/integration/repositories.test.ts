@@ -92,7 +92,7 @@ describe('repositories', () => {
     const broken = analysis({ id: good.id });
     await expect(repo.commitBatch({
       batchId: 'batch-1', analyses: [good, broken],
-      usage: [{ id: crypto.randomUUID(), jobId: 'j', batchId: 'batch-1', attemptIndex: 0, status: 'success', modelId: 'm', inputTokens: null, outputTokens: null, estimatedCny: null, priceVerifiedAt: null, durationMs: 100, createdAt: '2026-10-15T00:00:00Z' }],
+      usage: [{ id: crypto.randomUUID(), jobId: 'j', batchId: 'batch-1', attemptIndex: 0, status: 'success', modelId: 'm', providerRequestId: null, inputTokens: null, outputTokens: null, estimatedCny: null, priceVerifiedAt: null, durationMs: 100, createdAt: '2026-10-15T00:00:00Z' }],
     })).rejects.toThrow();
     expect(await db.analyses.count()).toBe(0);
     expect(await db.usage.count()).toBe(0);

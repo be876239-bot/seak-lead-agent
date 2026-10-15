@@ -1,6 +1,6 @@
 import { AppError } from '../domain/errors';
 import type { ClassificationInput, ProfileInput } from '../privacy/ai-payload';
-import type { AIProvider, AIResponse } from './provider';
+import type { AIProvider, AIResponse, RepairTurn } from './provider';
 
 export type MockScript = {
   profile?: (input: ProfileInput) => unknown;
@@ -24,7 +24,7 @@ export class MockProvider implements AIProvider {
     if (f) throw new AppError(f.code, f.message ?? `mock 故障：${f.code}`, f.retryable ?? false);
   }
 
-  async generateProfile(input: ProfileInput, _signal?: AbortSignal): Promise<AIResponse> {
+  async generateProfile(input: ProfileInput, _signal?: AbortSignal, _repair?: RepairTurn): Promise<AIResponse> {
     this.nextFailure();
     if (!this.script.profile) throw new AppError('UNKNOWN', 'mock 未配置 profile 脚本');
     return {
@@ -35,7 +35,7 @@ export class MockProvider implements AIProvider {
     };
   }
 
-  async classifyComments(input: ClassificationInput, _signal?: AbortSignal): Promise<AIResponse> {
+  async classifyComments(input: ClassificationInput, _signal?: AbortSignal, _repair?: RepairTurn): Promise<AIResponse> {
     this.nextFailure();
     if (this.script.classification) {
       return {

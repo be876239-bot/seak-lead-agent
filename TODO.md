@@ -2,7 +2,7 @@
 
 创建：2026-10-15。配套规范：`DEVELOPMENT.md`。
 
-**当前状态：G0、G1 已完成（T01–T09、T11–T14）；下一阶段 G2（T15–T22，T10 归入 G2）。真实浏览器验收（T28–T33）尚未开始。**
+**当前状态：G0、G1 已完成（T01–T09、T11–T14）；G2 已完成（T15–T21、G2 检查通过、T22 数据层完成，T10 画像数据层随 T21 落地；T22 用量 UI 与 T23+ 界面归 M3）。真实浏览器验收（T28–T33）尚未开始。**
 
 ## 给接手 AI 的执行指令
 
@@ -288,7 +288,7 @@ G1 检查：
 
 ### T19 — 全局任务锁与取消
 
-- [ ] T19 完成并记录
+- [x] T19 完成并记录
 
 依赖：T04、T15。
 
@@ -300,7 +300,7 @@ G1 检查：
 
 ### T20 — 批次规划与缓存
 
-- [ ] T20 完成并记录
+- [x] T20 完成并记录
 
 依赖：T13、T18、T19。
 
@@ -312,7 +312,7 @@ G1 检查：
 
 ### T21 — 运行状态和部分失败恢复
 
-- [ ] T21 完成并记录
+- [x] T21 完成并记录
 
 依赖：T14、T16、T17、T20。
 
@@ -335,9 +335,9 @@ G1 检查：
 验收：不使用旧 PRD 费用；不把字符数显示为真实 token；重开面板不重复累计已存 usage；没有供应商用量时明确未知。
 
 G2 检查：
-- [ ] mock 下产品→当前页→分析→保存→再次去重闭环通过。
-- [ ] 错误、取消、部分成功、并发锁和恢复用例通过。
-- [ ] mock 与生产环境清晰隔离。
+- [x] mock 下产品→当前页→分析→保存→再次去重闭环通过。（tests/integration/analysis-e2e.test.ts 8 项：真实 fixture 26 条评论 → 15+11 两批 → 26 条分析入库；重跑 0 次 AI 调用）
+- [x] 错误、取消、部分成功、并发锁和恢复用例通过。（超时 partial+只重试失败批、CANCELLED 中断可重试、LOCK_HELD 互斥不留 Job、换帖守卫、画像修复一次、running 遗留恢复）
+- [x] mock 与生产环境清晰隔离。（MockProvider 仅显式注入；getProvider 工厂缺 Key 报 AI_AUTH 不回退 mock，已单测）
 
 ## 第六阶段：用户界面与本地数据管理
 
@@ -498,6 +498,10 @@ G3 检查：
 | 2026-10-15 | T16 | 完成 | ai/validate-result.ts：validateProfileOutput（strict schema、user_edited 拒绝、observed 必带证据、sourceId 归属、引文对打码截断后实际输入做去空白连续子串）+ validateClassificationOutput（顶层 strict results、缺/多/重复 ID 拒绝、证据只允许本条 cNNN:text/parent.sourceId/n001、跨评论引用与捏造引文拒绝、条数一致）；修复消息 buildRepairMessages 最多一次；tests/unit/validate-grouping.test.ts | 修复轮次实际效果依赖真实模型，归 T30 |
 | 2026-10-15 | T17 | 完成 | domain/classification.ts group-v1 有序规则：排除（无关/卖家/不适配/否定需求）→待确认（unknown/相邻/不确定）→高意向（direct+明确需求+supported+seeker+付费意图+本人评论证据）→需求→待确认；free_only 与 unknown 角色禁止高意向；competitor 允许高意向但 needsTargetBadge 标注；无成交概率；人工纠正独立（Feedback 表不改 group 判定） | 规则阈值真实效果归 T30 真实评测 |
 | 2026-10-15 | T18 | 完成 | eval/synthetic.jsonl 32 条全 synthetic（high_intent 8/need 5/review 11/excluded 8，覆盖题库、相邻竞赛、免费、卖家、否定、短语、父评论跨作者、竞品价格、注入文本）+ eval/README.md 说明来源与限制；生成器 .scratch/build-synthetic.mjs 内置引文子串自检；tests/integration/synthetic-regression.test.ts 5 项：gold 全部通过 validateClassificationOutput、groupDecision 与期望一致、高意向全有自评论证据且零 free_only | 模拟成绩不代表真实中文效果，真实准确率归 T30 |
+| 2026-10-15 | T19 | 完成 | src/analysis/lock.ts TaskLockManager：5 秒心跳续租/60 秒租约（LOCK_TTL_MS）、跨面板互斥由 acquireLock 事务+generation 递增、assertOwned 提交前用 renewLock 校验 owner+generation（过期旧 owner 拒绝）、cancel=abort(CANCELLED)+释放锁、租约丢失自动 abort、recoverInterrupted 启动恢复；errors.ts 增 LOCK_HELD；background.ts 启动即标遗留任务 interrupted（不依赖 unload）；tests/integration/lock.test.ts 9 项通过（双面板互斥、崩溃接管、心跳保活、残留心跳不误伤） | 真实双面板并发与"AI 已计费未保存"语义归 T21 runner/T29 |
+| 2026-10-15 | T20 | 完成 | ai/batching.ts planCommentBatches：≤15 条/批且评论文本 ≤12,000 字符、父评论文本计入批次开销、单条超限截断标 truncated、不丢弃任何候选（无关键词过滤）；analysis/cache.ts filterUncached 先查缓存（无新评论 0 批=不调 AI）；ai-payload.ts 提取 classificationOverheadChars 与 DTO 计数同源，runner 以 overhead+批字数为预算保证规划条目全部进入；tests/unit/batching.test.ts 8 项通过（含 DTO 一致性、画像版本变化经 cacheKey 成分失效在 e2e 验证） | 真实模型上下文上限核验归 T30 |
+| 2026-10-15 | T21 | 完成 | analysis/runner.ts：runCommentsJob（锁→缓存过滤→批次持久化→逐批 采集后打码文本 DTO→classify→validate→repair(1)/retryable(1)→group-v1→commitBatch 事务；并发 1；换帖守卫 PAGE_CHANGED；cancelled/partial/failed/completed/interrupted 状态机）、retryCommentsJob 仅重跑 failed/interrupted 批（e2e 断言第 1 批绝不重跑）、runProfileGeneration（T10 数据层：buildProfileInput→validateProfileOutput→createProduct/replaceProfile 版本递增）；progress 回调供 UI；provider 接口增 RepairTurn（appendRepair 带坏输出、仅一次）；repositories 增 getJob/getNote/getProduct/getComments/batchesForJob/existingCacheKeys/addUsage/analysesForProduct，修正 deleteProduct/analyses 查询走复合索引；tests/integration/analysis-e2e.test.ts 8 项通过 | UI 进度呈现归 T23/T26；真实百炼端到端归 T30；后台消息接线（面板触发 runner）归 T23 |
+| 2026-10-15 | T22（数据层） | 部分完成 | Usage 表增 providerRequestId；runner 落真实 model/token（供应商缺失记 null）、durationMs、attemptIndex、请求 ID（若提供）；estimatedCny/priceVerifiedAt 保持 null（配置单价属 UI）；失败/无效输出尝试即时写 status failed/unknown（AI 可能已计费如实记录），重开面板不重复累计=读已存 usage（UI 侧待做）；ai/factory.ts getProvider 缺 Key AI_AUTH 不回退 mock + 单测 2 项 | 单价配置、用量组件与取消计费提示 UI 归 T25/T26；"不重复累计"需 UI 联调验收 |
 
 ## 任务状态更新
 
@@ -518,6 +522,9 @@ G3 检查：
 - [x] T16 完成并记录
 - [x] T17 完成并记录
 - [x] T18 完成并记录
+- [x] T19 完成并记录
+- [x] T20 完成并记录
+- [x] T21 完成并记录
 
 G0 检查：
 - [x] 基础构建通过，schema/数据表/消息类型一致。（pnpm typecheck/lint/test(25)/build 全绿，manifest MV3）

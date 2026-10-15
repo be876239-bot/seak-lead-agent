@@ -1,3 +1,4 @@
+import Dexie from 'dexie';
 import type {
   Analysis, Batch, Comment, Feedback, Job, Note, Product, ProductProfile, Usage,
 } from '../domain/schemas';
@@ -55,9 +56,11 @@ export class Repositories {
 
   async deleteProduct(id: string): Promise<void> {
     await this.db.transaction('rw', [this.db.products, this.db.analyses, this.db.leadStates, this.db.feedback], async () => {
-      await this.db.analyses.where('productId').equals(id).delete();
+      // analyses 无单列 productId 索引，用复合索引范围删除；feedback 同理走扫描（MVP 数据量小）
+      await this.db.analyses.where('[productId+commentKey]').between([id, Dexie.minKey], [id, Dexie.maxKey]).delete();
       await this.db.leadStates.where('productId').equals(id).delete();
-      await this.db.feedback.where('productId').equals(id).delete();
+      const fbIds = (await this.db.feedback.toArray()).filter((f) => f.productId === id).map((f) => f.id);
+      await this.db.feedback.bulkDelete(fbIds);
       await this.db.products.delete(id);
     });
   }
@@ -65,6 +68,10 @@ export class Repositories {
   // ---- notes / comments ----
   async putNote(note: Note): Promise<void> {
     await this.db.notes.put(note);
+  }
+
+  async getNote(noteKey: string): Promise<Note | null> {
+    return (await this.db.notes.get(noteKey)) ?? null;
   }
 
   async putComments(comments: Comment[]): Promise<void> {
@@ -117,6 +124,10 @@ export class Repositories {
     await this.db.jobs.add(job);
   }
 
+  async getJob(id: string): Promise<Job | null> {
+    return (await this.db.jobs.get(id)) ?? null;
+  }
+
   async updateJob(id: string, patch: Partial<Job>): Promise<void> {
     await this.db.jobs.update(id, { ...patch, updatedAt: nowIso() });
   }
@@ -127,6 +138,38 @@ export class Repositories {
 
   async updateBatch(id: string, patch: Partial<Batch>): Promise<void> {
     await this.db.batches.update(id, patch);
+  }
+
+  async batchesForJob(jobId: string): Promise<Batch[]> {
+    const rows = await this.db.batches.where('jobId').equals(jobId).toArray();
+    return rows.sort((a, b) => a.index - b.index);
+  }
+
+  // ---- queries for analysis runner ----
+  async getProduct(id: string): Promise<Product | null> {
+    return (await this.db.products.get(id)) ?? null;
+  }
+
+  async getComments(keys: readonly string[]): Promise<Comment[]> {
+    return this.db.comments.where('commentKey').anyOf([...keys]).toArray();
+  }
+
+  /** 已存在分析的 cacheKey 子集（先查缓存，无新评论不调用 AI）。 */
+  async existingCacheKeys(keys: readonly string[]): Promise<Set<string>> {
+    const found = await this.db.analyses.where('cacheKey').anyOf([...keys]).toArray();
+    return new Set(found.map((a) => a.cacheKey));
+  }
+
+  /** 失败/取消尝试的用量单独落库（AI 可能已计费但未保存结果，如实记录）。 */
+  async addUsage(usage: Usage): Promise<void> {
+    await this.db.usage.add(usage);
+  }
+
+  async analysesForProduct(productId: string): Promise<Analysis[]> {
+    const rows = await this.db.analyses.where('[productId+commentKey]')
+      .between([productId, Dexie.minKey], [productId, Dexie.maxKey])
+      .toArray();
+    return rows;
   }
 
   // ---- locks（T19 使用；接口在此定义并测试） ----

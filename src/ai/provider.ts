@@ -7,7 +7,9 @@ export type AIResponse = {
   providerRequestId?: string;
 };
 
+export type RepairTurn = { errorSummary: string; badOutput: string };
+
 export interface AIProvider {
-  generateProfile(input: ProfileInput, signal: AbortSignal): Promise<AIResponse>;
-  classifyComments(input: ClassificationInput, signal: AbortSignal): Promise<AIResponse>;
+  generateProfile(input: ProfileInput, signal: AbortSignal, repair?: RepairTurn): Promise<AIResponse>;
+  classifyComments(input: ClassificationInput, signal: AbortSignal, repair?: RepairTurn): Promise<AIResponse>;
 }

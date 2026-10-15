@@ -191,6 +191,7 @@ export const UsageSchema = z.object({
   attemptIndex: z.number().int().min(0),
   status: z.enum(['success', 'failed', 'unknown']),
   modelId: z.string().min(1).max(120),
+  providerRequestId: z.string().max(120).nullable(),
   inputTokens: z.number().int().min(0).nullable(),
   outputTokens: z.number().int().min(0).nullable(),
   estimatedCny: z.number().min(0).nullable(),

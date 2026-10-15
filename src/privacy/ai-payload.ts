@@ -34,6 +34,19 @@ const claimText = (c: Claim | undefined): string | null => c?.value ?? null;
 const claimList = (cs: Claim[], cap: number): string[] =>
   cs.map((c) => c.value).filter((v): v is string => v !== null).slice(0, cap);
 
+export function classificationProductTextLength(profile: ProductProfile): number {
+  const productClaims: Claim[] = [
+    profile.name, profile.category, profile.summary, profile.accessMethod, profile.price,
+    ...profile.capabilities, ...profile.targetAudience, ...profile.needsServed, ...profile.exclusions,
+  ];
+  return productClaims.reduce((n, c) => n + (c.value?.length ?? 0), 0);
+}
+
+/** DTO 中产品+笔记部分的固定字符开销（与 buildClassificationInput 的计数一致）。 */
+export function classificationOverheadChars(profile: ProductProfile, note: Note): number {
+  return classificationProductTextLength(profile) + Math.min(note.bodyExcerpt.length, LIMITS.maxNoteChars);
+}
+
 /** 产品来源块 → 画像输入。总字符预算 maxProductChars，超出截断并标记。 */
 export function buildProfileInput(blocks: SourceBlockDto[]): ProfileInput {
   const out: SourceBlockDto[] = [];
@@ -63,13 +76,8 @@ export function buildClassificationInput(
   parentLookup: Map<string, Comment>,
   budgetChars: number,
 ): { input: ClassificationInput; used: number } {
-  const productClaims: Claim[] = [
-    profile.name, profile.category, profile.summary, profile.accessMethod, profile.price,
-    ...profile.capabilities, ...profile.targetAudience, ...profile.needsServed, ...profile.exclusions,
-  ];
-  const productTextLen = productClaims.reduce((n, c) => n + (c.value?.length ?? 0), 0);
   const noteText = note.bodyExcerpt.slice(0, LIMITS.maxNoteChars);
-  let used = productTextLen + noteText.length;
+  let used = classificationProductTextLength(profile) + noteText.length;
 
   const items: ClassificationItem[] = [];
   const idMap: { commentKey: string; tempId: string }[] = [];

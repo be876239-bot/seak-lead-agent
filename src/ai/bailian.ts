@@ -1,8 +1,8 @@
 import { AppError } from '../domain/errors';
 import { LIMITS } from '../domain/limits';
 import type { ClassificationInput, ProfileInput } from '../privacy/ai-payload';
-import { buildCommentMessages, buildProfileMessages, type ChatMessage } from './prompts';
-import type { AIProvider, AIResponse } from './provider';
+import { buildCommentMessages, buildProfileMessages, appendRepair, type ChatMessage } from './prompts';
+import type { AIProvider, AIResponse, RepairTurn } from './provider';
 
 export type BailianConfig = {
   apiKey: string;
@@ -86,12 +86,14 @@ export class BailianProvider implements AIProvider {
   }
 
   /** 容忍个别模型在 JSON 外套 Markdown 代码围栏；协议仍要求纯 JSON。 */
-  generateProfile(input: ProfileInput, signal: AbortSignal): Promise<AIResponse> {
-    return this.chat(buildProfileMessages(input), signal);
+  generateProfile(input: ProfileInput, signal: AbortSignal, repair?: RepairTurn): Promise<AIResponse> {
+    const msgs = buildProfileMessages(input);
+    return this.chat(repair ? appendRepair(msgs, repair.errorSummary, repair.badOutput) : msgs, signal);
   }
 
-  classifyComments(input: ClassificationInput, signal: AbortSignal): Promise<AIResponse> {
-    return this.chat(buildCommentMessages(input), signal);
+  classifyComments(input: ClassificationInput, signal: AbortSignal, repair?: RepairTurn): Promise<AIResponse> {
+    const msgs = buildCommentMessages(input);
+    return this.chat(repair ? appendRepair(msgs, repair.errorSummary, repair.badOutput) : msgs, signal);
   }
 }
 
