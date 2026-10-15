@@ -109,6 +109,7 @@ function safeJson(value: unknown): string {
 /** 单批分类：可重试错误自动重试 1 次；格式无效修复 1 次；无静默无限重试。失败/无效尝试的用量即时落库。 */
 async function classifyWithRepair(
   deps: RunnerDeps, jobId: string, row: Batch, input: ClassificationInput, handle: LockHandle,
+  log?: (m: string) => void,
 ): Promise<{ resp: AIResponse; validated: ValidatedResult[]; durationMs: number }> {
   const mk = mkUsage({ jobId, batchId: row.id, deps });
   let attemptIndex = 0;
@@ -131,6 +132,7 @@ async function classifyWithRepair(
       if (e.retryable && !retryableRetried && !handle.signal.aborted) {
         retryableRetried = true;
         attemptIndex += 1;
+        log?.(`模型调用失败（${e.code}），自动重试 1 次…`);
         continue;
       }
       throw e;
@@ -147,6 +149,7 @@ async function classifyWithRepair(
         inputTokens: null, outputTokens: null, durationMs: Date.now() - t0,
       }));
       if (e.code !== 'AI_INVALID_OUTPUT' || repair) throw e;
+      log?.('批次输出校验未通过，发起修复重发（最多 1 次）…');
       repair = { errorSummary: e.message, badOutput: safeJson(resp.value) };
     }
   }
@@ -161,6 +164,7 @@ async function executeRows(
   parentLookup: Map<string, Comment>,
   candidateByCommentKey: Map<string, Candidate>,
   onProgress?: (p: ProgressInfo) => void,
+  log?: (m: string) => void,
 ): Promise<Outcome> {
   const outcome: Outcome = { cancelled: false, interrupted: false, completedItems: 0, failedItems: 0, firstError: null };
   const total = rows.length;
@@ -206,6 +210,7 @@ async function executeRows(
       row.status = 'completed';
       done += 1;
       outcome.completedItems += comments.length;
+      log?.(`批次 ${row.index + 1}/${total} 缓存命中（${comments.length} 条），不调用模型`);
       continue;
     }
 
@@ -214,9 +219,10 @@ async function executeRows(
       classificationOverheadChars(ctx.product.profile, ctx.note) +
       comments.reduce((n, c) => n + commentEstimate(c, parentLookup), 0);
     const { input } = buildClassificationInput(ctx.product.profile, ctx.note, comments, parentLookup, budget);
+    log?.(`批次 ${row.index + 1}/${total} 已提交模型（${comments.length} 条，约 ${budget} 字符），等待返回…`);
 
     try {
-      const { resp, validated, durationMs } = await classifyWithRepair(deps, ctx.jobId, row, input, ctx.handle);
+      const { resp, validated, durationMs } = await classifyWithRepair(deps, ctx.jobId, row, input, ctx.handle, log);
       const mk = mkUsage({ jobId: ctx.jobId, batchId: row.id, deps });
       const successUsage = mk({
         attemptIndex: 0, status: 'success',
@@ -245,6 +251,8 @@ async function executeRows(
       row.status = 'completed';
       done += 1;
       outcome.completedItems += comments.length;
+      log?.(`批次 ${row.index + 1}/${total} 完成：耗时 ${(durationMs / 1000).toFixed(1)} 秒`
+        + `${resp.usage.inputTokens != null ? `，tokens ${resp.usage.inputTokens}/${resp.usage.outputTokens ?? '?'}` : '（模型未回报 token）'}`);
     } catch (err) {
       const e = ensureAppError(err);
       // 失败尝试的用量先落库（AI 可能已计费但未保存结果）
@@ -259,6 +267,7 @@ async function executeRows(
       outcome.failedItems += comments.length;
       outcome.firstError ??= e.code;
       await deps.repos.updateBatch(row.id, { status: 'failed', errorCode: e.code });
+      log?.(`批次 ${row.index + 1}/${total} 失败：${e.code}`);
       if (e.code === 'AI_AUTH') {
         await stopRemaining('interrupted');
         break;
@@ -282,7 +291,10 @@ function jobFinalStatus(outcome: Outcome, rows: Batch[]): { status: Job['status'
 
 export async function runCommentsJob(
   deps: RunnerDeps,
-  spec: { productId: string; note: Note; comments: Comment[]; jobId?: string; tabId?: number | null; onProgress?: (p: ProgressInfo) => void },
+  spec: {
+    productId: string; note: Note; comments: Comment[]; jobId?: string; tabId?: number | null;
+    onProgress?: (p: ProgressInfo) => void; log?: (m: string) => void;
+  },
 ): Promise<Job> {
   const jobId = spec.jobId ?? crypto.randomUUID();
   const job: Job = {
@@ -325,10 +337,12 @@ export async function runCommentsJob(
       startedAt: null, completedAt: null, errorCode: null,
     }));
     if (rows.length) await deps.repos.addBatches(rows);
+    spec.log?.(`批次规划：${uncached.length} 条需模型分析（共 ${rows.length} 批，逐批串行提交）`
+      + `，${comments.length - uncached.length} 条已有结果走缓存不产生费用`);
 
     const candidateByCommentKey = new Map(candidates.map((c) => [c.comment.commentKey, c]));
     const outcome = rows.length
-      ? await executeRows(deps, { jobId, product, note: spec.note, handle }, rows, parentLookup, candidateByCommentKey, spec.onProgress)
+      ? await executeRows(deps, { jobId, product, note: spec.note, handle }, rows, parentLookup, candidateByCommentKey, spec.onProgress, spec.log)
       : { cancelled: false, interrupted: false, completedItems: 0, failedItems: 0, firstError: null as Code | null };
     const fin = jobFinalStatus(outcome, rows);
     await deps.repos.updateJob(jobId, {
@@ -348,7 +362,8 @@ export async function runCommentsJob(
 
 /** 手动重试：仅重跑 failed/interrupted 批次，completed 批次绝不重跑。 */
 export async function retryCommentsJob(
-  deps: RunnerDeps, jobId: string, onProgress?: (p: ProgressInfo) => void,
+  deps: RunnerDeps, jobId: string,
+  onProgress?: (p: ProgressInfo) => void, log?: (m: string) => void,
 ): Promise<Job> {
   const job = await deps.repos.getJob(jobId);
   if (!job || job.kind !== 'comments') throw new AppError('STORAGE_ERROR', '任务不存在');
@@ -362,6 +377,7 @@ export async function retryCommentsJob(
   const rows = await deps.repos.batchesForJob(jobId);
   const retryable = rows.filter((r) => r.status === 'failed' || r.status === 'interrupted');
   if (!retryable.length) throw new AppError('UNKNOWN', '没有失败或中断的批次可重试');
+  log?.(`重试计划：${retryable.length} 个失败或中断的批次将重新提交模型`);
   for (const r of retryable) {
     r.status = 'pending';
     r.errorCode = null;
@@ -379,7 +395,7 @@ export async function retryCommentsJob(
     const merged = [...allComments, ...parents];
     const { candidates, parentLookup } = buildCandidates(deps, product, note, merged);
     const candidateByCommentKey = new Map(candidates.map((c) => [c.comment.commentKey, c]));
-    const outcome = await executeRows(deps, { jobId, product, note, handle }, rows, parentLookup, candidateByCommentKey, onProgress);
+    const outcome = await executeRows(deps, { jobId, product, note, handle }, rows, parentLookup, candidateByCommentKey, onProgress, log);
     const fin = jobFinalStatus(outcome, rows);
     await deps.repos.updateJob(jobId, {
       status: fin.status, errorCode: fin.errorCode,
@@ -395,7 +411,10 @@ export async function retryCommentsJob(
 /** 产品画像生成（T10）：来源块 → DTO → 模型 → 校验（修复一次）→ 保存。 */
 export async function runProfileGeneration(
   deps: RunnerDeps,
-  spec: { inputUrl: string; finalUrl: string; blocks: ProductSourceBlock[]; existingProductId?: string; jobId?: string },
+  spec: {
+    inputUrl: string; finalUrl: string; blocks: ProductSourceBlock[];
+    existingProductId?: string; jobId?: string; log?: (m: string) => void;
+  },
 ): Promise<Product> {
   const jobId = spec.jobId ?? crypto.randomUUID();
   const job: Job = {
@@ -435,12 +454,14 @@ export async function runProfileGeneration(
         if (e.code === 'CANCELLED' || !(e.retryable && !retryableRetried)) throw e;
         retryableRetried = true;
         attemptIndex += 1;
+        spec.log?.(`模型调用失败（${e.code}），自动重试 1 次…`);
         continue;
       }
       attemptIndex += 1;
       lastCallMs = Date.now() - t0;
       try {
         profile = validateProfileOutput(resp.value, input.blocks);
+        spec.log?.(`模型返回画像：耗时 ${(lastCallMs / 1000).toFixed(1)} 秒，引文校验通过`);
         break;
       } catch (err) {
         const e = ensureAppError(err);
@@ -450,6 +471,7 @@ export async function runProfileGeneration(
           inputTokens: null, outputTokens: null, durationMs: Date.now() - t0,
         }));
         if (e.code !== 'AI_INVALID_OUTPUT' || repair) throw e;
+        spec.log?.('画像输出校验未通过，发起修复重发（最多 1 次）…');
         repair = { errorSummary: e.message, badOutput: safeJson(resp.value) };
       }
     }

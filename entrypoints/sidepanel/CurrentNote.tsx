@@ -218,6 +218,11 @@ export default function CurrentNote() {
         {busy && <button onClick={() => void cancel()}>取消任务</button>}
         {!busy && isRetryableJob(job) && <button onClick={() => void retry()}>重试失败/中断批次</button>}
       </div>
+      {!busy && (
+        <p style={{ color: '#888', margin: 0, fontSize: 11 }}>
+          想要更多评论：先在页面里手动向下滚动，让小红书加载完再点分析（只分析页面已加载评论，不做自动滚动，避免触发风控）；再次分析时已分析过的走缓存、不重复计费。
+        </p>
+      )}
       {job && (
         <p role="status" style={{ margin: 0 }}>
           任务：{jobPhaseLabel(job)}{job.errorCode ? `（${job.errorCode}）` : ''}

@@ -58,7 +58,9 @@ async function markFailedIfOpen(jobId: string, code: string): Promise<void> {
 
 function failLog(jobId: string, err: unknown): void {
   const e = toErrorPayload(err);
-  emitJobLog(jobId, `失败：${e.code} ${e.message.slice(0, 200)}`, 'error');
+  // 校验类报错正文含引文原文（可能是评论文本）：日志只保留"："前的说明，不外泄正文
+  const detail = e.code === 'AI_INVALID_OUTPUT' ? (e.message.split('：')[0] ?? e.code) : e.message.slice(0, 200);
+  emitJobLog(jobId, `失败：${e.code} ${detail}`, 'error');
 }
 
 export function registerAnalysisHandlers(): void {
@@ -78,6 +80,7 @@ export function registerAnalysisHandlers(): void {
       const product = await runProfileGeneration(deps, {
         jobId, inputUrl: sources.inputUrl, finalUrl: sources.finalUrl,
         blocks: sources.blocks, existingProductId,
+        log: (m) => emitJobLog(jobId, m),
       });
       emitJobLog(jobId, `画像已保存（产品 ${product.id}，画像版本 ${product.profileVersion}）`);
       return { jobId, productId: product.id };
@@ -113,6 +116,7 @@ export function registerAnalysisHandlers(): void {
       await analysisRepos.putComments(snap.comments);
       const job = await runCommentsJob(deps, {
         productId, note: snap.note, comments: snap.comments, jobId, tabId,
+        log: (m) => emitJobLog(jobId, m),
         onProgress: (p) => emitJobLog(jobId,
           `批次进度：${p.completedBatches + p.failedBatches}/${p.totalBatches}`
           + `（成功 ${p.completedBatches}，失败 ${p.failedBatches}）`),
@@ -159,7 +163,7 @@ export function registerAnalysisHandlers(): void {
       emitJobLog(req.payload.jobId,
         `批次进度：${p.completedBatches + p.failedBatches}/${p.totalBatches}`
         + `（成功 ${p.completedBatches}，失败 ${p.failedBatches}）`);
-    }).then((job) => {
+    }, (m) => emitJobLog(req.payload.jobId, m)).then((job) => {
       emitJobLog(req.payload.jobId, `任务结束：${job.status}${job.errorCode ? `（${job.errorCode}）` : ''}`);
     }).catch((err) => {
       failLog(req.payload.jobId, err);
