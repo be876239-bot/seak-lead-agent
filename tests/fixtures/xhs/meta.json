@@ -1,0 +1,46 @@
+{
+  "capturedAt": "2026-10-15",
+  "source": "Qoder 内置 Chromium 浏览器，已登录小红书网页版（用户本人账号），真实页面 DOM",
+  "anonymization": {
+    "applied": true,
+    "rules": [
+      "用户 ID(24位hex)→anonuserN 一致映射（href 与 data-user-id）",
+      "昵称/回复对象 .nickname 文本→anonuserN 或 匿名用户",
+      "笔记 ID→anonnoteN（信息流卡片 href）",
+      "评论元素 id comment-<hex>→comment-0001… 顺序合成，父子映射保持一致",
+      "移除全部 xsec_token/xsec_source/channel_type 查询参数与 data-xsec-token 属性",
+      "img src→占位符，外链 a href→#，svg→svg-ph，script/style 整体移除",
+      "文本节点跑手机号/邮箱/身份证正则脱敏"
+    ],
+    "rawFiles": "docs/evidence/raw/（gitignore，未脱敏，不提交）",
+    "note": "评论正文为公开发言，保留原文用于解析回归；未包含联系方式类 PII"
+  },
+  "structure": {
+    "modalRoot": "#noteContainer .note-container",
+    "title": "h1#detail-title.title",
+    "bodyText": "#detail-desc .note-text",
+    "commentsArea": ".comments-el .comments-container",
+    "totalSelector": ".comments-container .total",
+    "listContainer": ".list-container",
+    "parentWrapper": ".parent-comment",
+    "commentItem": ".comment-item (element id=comment-<platformId>)",
+    "subCommentItem": ".comment-item.comment-item-sub (在 .reply-container 内)",
+    "authorLink": ".author-wrapper .author a.name (href=/user/profile/<id>)",
+    "authorTag": ".author .tag 如“作者”",
+    "content": ".content .note-text",
+    "dateLocation": ".info .date span + span.location",
+    "likeCount": ".interactions .like .count",
+    "replyCount": ".interactions .reply .count",
+    "showMore": ".show-more 文本如“展开 N 条回复”“展开更多回复”",
+    "noComments": ".no-comments",
+    "feedCard": "section.note-item（详情弹层背后，解析必须排除）"
+  },
+  "files": {
+    "note-detail-expanded.html": { "kind": "note-modal", "parents": 10, "subs": 18, "unexpandedShowMore": 5, "totalText": "共 100 条评论" },
+    "note-detail-collapsed.html": { "kind": "note-modal", "parents": 10, "subs": 8, "unexpandedShowMore": 7 },
+    "note-detail-no-comments.html": { "kind": "note-modal", "parents": 0, "subs": 0, "noComments": true },
+    "page-overlay-with-feed.html": { "kind": "note-modal + feed-behind", "parents": 10, "subs": 18, "feedCards": 30, "purpose": "X01 隔离：弹层内解析，不混入背后信息流" },
+    "feed-only.html": { "kind": "feed-no-modal", "feedCards": 30, "purpose": "detectPage 应返回 unsupported" },
+    "error-page-404.html": { "kind": "error", "purpose": "无效笔记 404，detectPage 应返回 unsupported/blocked，不虚构评论" }
+  }
+}
