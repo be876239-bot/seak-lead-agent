@@ -17,7 +17,7 @@ export type LeadsExportDocument = {
     group: string; modelGroup: string; source: 'model' | 'human';
     correctionNote: string | null; handled: boolean;
     commentKey: string; commentText: string;
-    /** 网友身份：脱敏昵称、主页用户 ID、IP 属地、主页链接（仅本地导出，绝不进 AI 请求） */
+    /** 网友身份：昵称原文（D006）、主页用户 ID、IP 属地、主页链接（仅本地导出，绝不进 AI 请求） */
     authorNickname: string | null; authorUserId: string | null;
     ipLocation: string | null; authorProfileUrl: string | null;
     noteKey: string; noteUrl: string | null;
@@ -30,7 +30,7 @@ export type LeadsExportDocument = {
   }[];
 };
 
-/** 导出打码后的业务字段与本地身份字段（昵称/用户 ID/属地）：不含 Key、原始未打码 DOM、任务锁；身份字段绝不进入 AI 请求。 */
+/** 导出打码后的业务字段与本地身份字段（昵称原文/用户 ID/属地，D006）：不含 Key、原始未打码 DOM、任务锁；身份字段绝不进入 AI 请求。 */
 export function buildLeadsExport(args: {
   product: Product | null;
   views: LeadView[];

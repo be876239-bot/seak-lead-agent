@@ -223,7 +223,7 @@ export class XhsSessionManager {
         platformCommentId: p.platformCommentId,
         parentKey,
         text,
-        authorDisplayName: p.authorDisplayName ? redactText(normalizeCommentText(p.authorDisplayName)) : null,
+        authorDisplayName: p.authorDisplayName ? normalizeCommentText(p.authorDisplayName).slice(0, 120) || null : null,
         authorLocalKey: p.authorLocalKey,
         profileUrl: p.profileUrl,
         locationText: p.locationText ? redactText(p.locationText).slice(0, 60) : null,

@@ -18,3 +18,6 @@
 ## D005 2026-10-15 模型输出 schema 使用 z.strictObject
 - zod 4 的 z.object 默认剥离未知键；DEVELOPMENT.md 要求“未知字段拒绝”，DecisionSchema 与 ProductProfileSchema 改为 z.strictObject，其余持久化 schema 保持剥离语义。
 
+
+## D006 2026-10-16 昵称保留原文不打码（用户指示）
+- 用户明确要求导出与界面显示网友昵称原文（"脱敏昵称不要脱敏啊"）。session.ts 昵称仅做空白规整、不再 redactText；昵称/主页/属地仍绝不进入 AI DTO（白名单不变）。风险口径随 DEVELOPMENT.md 第 9 节修订：导出文件含原始昵称，数据由用户本地自担。旧库中已打码的昵称会在同笔记重新采集时覆盖为原文。
