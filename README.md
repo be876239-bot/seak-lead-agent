@@ -10,18 +10,58 @@
 
 ## 开发状态
 
-当前处于 MVP 开发中，进度以 `TODO.md` 勾选为准。规范见 `DEVELOPMENT.md`，任务清单见 `TODO.md`，调研见 `觅客Agent-MVP技术方案.md`。
+MVP 代码与自动化验证已完成（187 项测试、typecheck/lint/build 全绿，见 `docs/test-report.md`）。
+**尚未完成：真实浏览器加载验收（T29）与真实模型效果评测（T30）。** 进度以 `TODO.md` 勾选为准；规范见 `DEVELOPMENT.md`，任务清单见 `TODO.md`，调研见 `觅客Agent-MVP技术方案.md`。
 
-## 构建与加载（开发中，安装说明在 T32 定稿）
+## 环境要求
 
-环境：Node v24.13.0、pnpm 10.33.0（实测版本）。
+- Node v24.13.0、pnpm 10.33.0（实测版本；其他新版本未验证）
+- Chrome 或 Edge 桌面版（Firefox 行为未测试，不支持 Safari 语法）
+- 一个阿里云百炼 API Key（OpenAI 兼容端点，默认模型 qwen3.8-flash）
+
+## 安装与构建
 
 ```bash
-pnpm install     # 安装依赖
-pnpm dev         # 开发模式
-pnpm build       # 构建，产物在 .output/chrome-mv3/
-pnpm zip         # 打包 zip
-pnpm typecheck && pnpm lint && pnpm test
+pnpm install          # 安装依赖（postinstall 自动执行 wxt prepare）
+pnpm build            # 生产构建，产物在 .output/chrome-mv3/
+pnpm build:edge       # Edge 构建，产物在 .output/edge-mv3/
+pnpm zip              # 打包 zip（另有 zip:edge）
+pnpm typecheck && pnpm lint && pnpm test   # 静态检查与 187 项测试
 ```
 
-构建后在浏览器 `chrome://extensions`（或 Edge `edge://extensions`）开启开发者模式，加载 `.output/chrome-mv3/` 目录。
+## 加载到浏览器（本地开发方式）
+
+1. Chrome 打开 `chrome://extensions`，Edge 打开 `edge://extensions`。
+2. 右上角开启**开发者模式**。
+3. 点**加载解压缩的扩展**，选择 `.output/chrome-mv3/`（Edge 选 `.output/edge-mv3/`）。
+4. 点击工具栏中的觅客Agent 图标即打开侧边栏（首次需允许侧边栏）。
+
+## 使用流程
+
+1. **配置 Key（设置页）**：粘贴百炼 API Key，可选“在此浏览器记住”（存 `storage.local`；不记住则仅当前会话 `storage.session`）。需要时点“授权模型域名”“连接测试”。Key 绝不进入同步存储、数据库、导出文件或日志。
+2. **识别产品（产品页）**：粘贴产品官网链接 → 自动读取网页（静态优先，必要时临时标签渲染兜底，同域最多补读 2 页）→ 生成带证据的画像。未知信息保持“未知”，不要求填问卷；可取消、可删除、可重新生成（画像版本递增）。
+3. **分析当前笔记（当前笔记页）**：在浏览器里**手动**打开一篇小红书笔记并滚动加载评论，然后回侧边栏点“读取并分析已加载评论”。界面显示“已读取 N 条已加载评论”，**不包含未加载部分，也不会替你滚动**。已有缓存的评论不会重复调用 AI；失败/中断可“重试失败批次”。
+4. **跟进线索（线索页）**：按分组/处理状态/关键词过滤，标记已处理，人工纠正分组（写纠正记录，不改也不覆盖模型原判），导出 JSON/CSV。
+5. **数据生命周期（设置页）**：保留期 7/30/90 天（默认 30），启动与每日首次使用自动清理，也可“立即清理”（需先取消活跃任务）；“清除 Key”和“清除全部业务数据”是两个独立操作。
+
+## 数据存储位置
+
+- 业务数据：本机扩展的 IndexedDB（Dexie，库名 `seeklead-agent`），10 张表：产品/笔记/评论/分析/线索状态/纠正/任务/批次/用量/锁。不出本机、不云同步。
+- API Key：`browser.storage.session`（会话）或 `browser.storage.local`（勾选记住）；永不写入 IndexedDB。
+- 评论快照过期后按保留期清理；“已处理”标记永久保留，重新分析不会丢失。
+
+## 卸载前导出
+
+在“线索页”用“导出当前筛选 JSON/CSV”（或先把过滤设为全部）下载文件；JSON 含 `schemaVersion` 和画像版本，CSV 带 UTF-8 BOM 并做了公式注入防护。导出只含打码后的业务字段。确认备份后再删除扩展；删除扩展会同时清空本机 IndexedDB。
+
+## 已知限制（显眼提醒）
+
+- **真实浏览器加载验收（T29）与真实模型效果评测（T30）未完成**：自动化测试全部基于 mock 与脱敏 fixture，不能据此宣称线上效果达标；高意向精确率 ≥85%、需求召回率 ≥80% 的目标尚无任何真实数据。
+- 只分析已加载评论；未加载部分需你手动滚动后再“新增分析”。
+- 页面被验证码/登录遮挡时停止并提示，不尝试绕过。
+- 产品页需要公开可访问；私网/带账号密码的 URL 会被直接拒绝。
+- Edge 之外的浏览器、Windows 之外的系统未测试。
+
+## 第三方来源与许可证
+
+见 `THIRD_PARTY_NOTICES.md`（T01 登记的复用清单与核对结论）。
