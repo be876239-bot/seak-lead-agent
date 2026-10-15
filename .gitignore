@@ -8,3 +8,4 @@ dist/
 docs/evidence/raw/
 test-results/
 coverage/
+.scratch/

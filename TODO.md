@@ -238,7 +238,7 @@ G1 检查：
 
 ### T15 — 单一国内 Provider 与 Mock
 
-- [ ] T15 完成并记录
+- [x] T15 完成并记录
 
 依赖：T03、T05、T06；不依赖真实小红书。
 
@@ -250,7 +250,7 @@ G1 检查：
 
 ### T16 — 产品和意向输出校验
 
-- [ ] T16 完成并记录
+- [x] T16 完成并记录
 
 依赖：T15。
 
@@ -262,7 +262,7 @@ G1 检查：
 
 ### T17 — 确定性分组
 
-- [ ] T17 完成并记录
+- [x] T17 完成并记录
 
 依赖：T03。
 
@@ -274,7 +274,7 @@ G1 检查：
 
 ### T18 — 提示词与模拟回归集
 
-- [ ] T18 完成并记录
+- [x] T18 完成并记录
 
 依赖：T15、T16、T17。
 
@@ -494,6 +494,10 @@ G3 检查：
 | 2026-10-15 | T12 | 完成 | xhs/adapter.ts：detectPage/parseNote/parseLoadedComments，限定评论容器、缺容器报 PARSE_FAILED 绝不整页兜底，父子 comment 对应、作者“作者”标签、赞/回复占位文本不产数字；tests/unit/xhs-adapter.test.ts 15 项通过（6 fixture + URL 桩：noteId 不取 xsec_token，feed 卡片零混入 28 条精确） | 风控验证码 DOM 特征未采集（不主动触发），遮挡检测待 T29 补证 |
 | 2026-10-15 | T13 | 完成 | domain/identity.ts（强/弱身份、保守组合哈希、无作者无时间按序号保守保留、commentKey 去重、contextHash 只含稳定上下文、publishedAt 不猜相对时间）+ analysis/cache.ts（8 成分缓存键、filterUncached）；tests/unit/identity-cache.test.ts 18 项通过；AI 临时 c001/p001 映射复用 ai-payload.ts idMap | 缓存失效的真实模型调用收益归 T20/T22 mock 闭环验证 |
 | 2026-10-15 | T14 | 完成 | xhs/session.ts XhsSessionManager：STATUS/START/SNAPSHOT/STOP 路由、启动后才挂 observer、500ms 防抖、先打码再暂存、500 上限 truncated、心跳 15s 检查/60s 无活动结束、SPA 换帖撤旧会话（PAGE_CHANGED）、登录弹窗出现即停（PAGE_BLOCKED）、UTF-8 预算分块 + 绑定 sessionId/version 的 cursor（换帖/缓冲变化→SNAPSHOT_EXPIRED）；entrypoints/xhs.content.ts 只处理 XHS_* 且校验 sender.id；protocol.ts 导出 payload 类型；tests/integration/xhs-session.test.ts 16 项通过（真实 fixture 28 条中 2 条纯图片无文本被跳过→26 条、>1MB 分块翻页取全 300 条） | X03 真实滚动移除、真实扩展环境消息链路归 T29 |
+| 2026-10-15 | T15 | 完成 | ai/provider.ts（AIProvider 接口 + AIResponse usage null 语义）、ai/bailian.ts（POST {baseUrl}/chat/completions、qwen3.8-flash、response_format json_object、enable_thinking:false、外部 AbortSignal+60s 超时合并、401/403→AI_AUTH、429→AI_RATE_LIMIT、413→AI_PAYLOAD_TOO_LARGE、5xx/网络→AI_TIMEOUT、外部取消→CANCELLED、坏 JSON→AI_INVALID_OUTPUT；错误消息只带 provider message 截断 200 字符，绝不含评论正文或 Key）、ai/mock.ts（显式注入、缺脚本报错不静默回退、failures 队列）、ai/prompts.ts（profile-v1/comment-v1 系统提示词、数据与指令分离、few-shot 标注模拟样例）；tests/unit/ai-provider.test.ts 覆盖 HTTP 成功/失败/取消/截断/日志洁净 | 真实云端批量分类闭环归 T22/T30 |
+| 2026-10-15 | T16 | 完成 | ai/validate-result.ts：validateProfileOutput（strict schema、user_edited 拒绝、observed 必带证据、sourceId 归属、引文对打码截断后实际输入做去空白连续子串）+ validateClassificationOutput（顶层 strict results、缺/多/重复 ID 拒绝、证据只允许本条 cNNN:text/parent.sourceId/n001、跨评论引用与捏造引文拒绝、条数一致）；修复消息 buildRepairMessages 最多一次；tests/unit/validate-grouping.test.ts | 修复轮次实际效果依赖真实模型，归 T30 |
+| 2026-10-15 | T17 | 完成 | domain/classification.ts group-v1 有序规则：排除（无关/卖家/不适配/否定需求）→待确认（unknown/相邻/不确定）→高意向（direct+明确需求+supported+seeker+付费意图+本人评论证据）→需求→待确认；free_only 与 unknown 角色禁止高意向；competitor 允许高意向但 needsTargetBadge 标注；无成交概率；人工纠正独立（Feedback 表不改 group 判定） | 规则阈值真实效果归 T30 真实评测 |
+| 2026-10-15 | T18 | 完成 | eval/synthetic.jsonl 32 条全 synthetic（high_intent 8/need 5/review 11/excluded 8，覆盖题库、相邻竞赛、免费、卖家、否定、短语、父评论跨作者、竞品价格、注入文本）+ eval/README.md 说明来源与限制；生成器 .scratch/build-synthetic.mjs 内置引文子串自检；tests/integration/synthetic-regression.test.ts 5 项：gold 全部通过 validateClassificationOutput、groupDecision 与期望一致、高意向全有自评论证据且零 free_only | 模拟成绩不代表真实中文效果，真实准确率归 T30 |
 
 ## 任务状态更新
 
@@ -510,6 +514,10 @@ G3 检查：
 - [x] T12 完成并记录
 - [x] T13 完成并记录
 - [x] T14 完成并记录
+- [x] T15 完成并记录
+- [x] T16 完成并记录
+- [x] T17 完成并记录
+- [x] T18 完成并记录
 
 G0 检查：
 - [x] 基础构建通过，schema/数据表/消息类型一致。（pnpm typecheck/lint/test(25)/build 全绿，manifest MV3）
