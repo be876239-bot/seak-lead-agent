@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { browser } from 'wxt/browser';
 import type { Job, Product } from '../../src/domain/schemas';
 import { sendRequest } from '../../src/messaging/client';
 import { toErrorPayload } from '../../src/domain/errors';
@@ -121,6 +122,24 @@ export default function Products() {
   const start = async () => {
     setError(null);
     if (!url.trim()) { setError('请先粘贴产品页链接'); return; }
+    let origin: string;
+    try {
+      const u = new URL(url.trim());
+      if (u.protocol !== 'https:' && u.protocol !== 'http:') throw new Error('proto');
+      origin = u.origin;
+    } catch {
+      setError('链接需是 http(s) 完整地址');
+      return;
+    }
+    // 授权弹窗必须在用户点击手势内发起；后台只能校验，不能弹权限窗
+    let granted = false;
+    try {
+      granted = await browser.permissions.request({ origins: [`${origin}/*`] });
+    } catch {
+      setError('域名授权请求失败：请检查链接格式后重试');
+      return;
+    }
+    if (!granted) { setError(`未授权 ${origin}：无法读取该网站，请重新点击并在弹窗中选择“允许”`); return; }
     const jobIdNew = crypto.randomUUID();
     setJob({
       id: jobIdNew, kind: 'product', status: 'created', ownerId: '', generation: 0,
