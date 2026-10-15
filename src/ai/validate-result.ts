@@ -7,11 +7,28 @@ import {
 } from '../domain/schemas';
 import type { ClassificationInput } from '../privacy/ai-payload';
 
-/** 规范化空白后的连续子串校验（针对打码、截断后的实际输入文本）。 */
+/**
+ * 引文允许标准省略号（… / ...）分节：拆出的每个片段必须是来源块中按序出现的连续原文，
+ * 全部片段按顺序命中才通过——拼接真实原文可以，捏造或乱序拼贴不行。
+ */
+const ELLIPSIS_RE = /(?:\.{3,}|…+|⋯+)/;
+
+/** 空白不敏感 + 全角/半角兼容形不敏感（NFKC 只统一字形，不允许改写内容）。 */
+function norm(s: string): string {
+  return s.normalize('NFKC').replace(/\s+/g, '');
+}
+
 export function isNormalizedSubstring(quote: string, text: string): boolean {
-  const q = quote.replace(/\s+/g, '');
-  const t = text.replace(/\s+/g, '');
-  return q.length > 0 && t.includes(q);
+  const t = norm(text);
+  const parts = quote.split(ELLIPSIS_RE).map(norm).filter((p) => p.length > 0);
+  if (parts.length === 0) return false;
+  let pos = 0;
+  for (const p of parts) {
+    const idx = t.indexOf(p, pos);
+    if (idx === -1) return false;
+    pos = idx + p.length;
+  }
+  return true;
 }
 
 export type ValidatedResult = {
@@ -42,7 +59,7 @@ export function validateProfileOutput(value: unknown, blocks: readonly { id: str
     for (const ev of c.evidence) {
       const text = byId.get(ev.sourceId);
       if (text === undefined) fail(`证据 sourceId 不属于来源块：${ev.sourceId}`);
-      else if (!isNormalizedSubstring(ev.quote, text)) fail(`证据引文不是来源块连续原文：${ev.sourceId}`);
+      else if (!isNormalizedSubstring(ev.quote, text)) fail(`证据引文不是来源块原文连续段（可用“…”按序省略中间内容）：${ev.sourceId}「${ev.quote.slice(0, 80)}」`);
     }
   }
   return profile;
@@ -81,7 +98,7 @@ export function validateClassificationOutput(value: unknown, input: Classificati
     for (const ev of decision.evidence) {
       const text = allowed.get(ev.sourceId);
       if (text === undefined) fail(`commentId ${decision.commentId} 引用了不属于其上下文的证据：${ev.sourceId}`);
-      if (!isNormalizedSubstring(ev.quote, text)) fail(`commentId ${decision.commentId} 引文不是原文连续子串：${ev.sourceId}`);
+      if (!isNormalizedSubstring(ev.quote, text)) fail(`commentId ${decision.commentId} 引文不是原文连续段（可用“…”按序省略中间内容）：${ev.sourceId}「${ev.quote.slice(0, 80)}」`);
       if (ev.sourceId === `${item.commentId}:text`) hasSelfEvidence = true;
     }
     out.push({ decision, hasSelfEvidence });

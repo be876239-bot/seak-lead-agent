@@ -51,6 +51,14 @@ describe('validateClassificationOutput', () => {
     expect(isNormalizedSubstring('多少钱，在哪', '这个题库多少钱，在哪开通？')).toBe(true);
     expect(isNormalizedSubstring('', 'abc')).toBe(false);
   });
+  it('省略号分节引文：各段按序逐字命中即通过；乱序或捏造段拒绝', () => {
+    const text = '这个题库多少钱，在哪开通？支持考研和公考两个方向。';
+    expect(isNormalizedSubstring('题库多少钱 …… 在哪开通', text)).toBe(true);
+    expect(isNormalizedSubstring('支持考研 … 公考两个方向', text)).toBe(true);
+    expect(isNormalizedSubstring('在哪开通…题库多少钱', text)).toBe(false);
+    expect(isNormalizedSubstring('题库多少钱……不存在的片段', text)).toBe(false);
+    expect(isNormalizedSubstring('……', text)).toBe(false);
+  });
   it('缺 ID / 多 ID / 重复 ID 均拒绝', () => {
     expect(() => validateClassificationOutput({ results: [results().results[1]!] }, input())).toThrowError(/缺少请求的 commentId/);
     expect(() => validateClassificationOutput(results([{ ...base, commentId: 'c099' }]), input())).toThrowError(/未请求/);
@@ -66,7 +74,7 @@ describe('validateClassificationOutput', () => {
     expect(() => validateClassificationOutput(
       results([], (d) => ({ ...d, evidence: [{ sourceId: 'c001:text', quote: '我要马上购买' }] })),
       input(),
-    )).toThrowError(/不是原文连续子串/);
+    )).toThrowError(/不是原文连续段/);
   });
   it('未知顶层字段、results 之外的键拒绝（strict）', () => {
     expect(() => validateClassificationOutput({ ...results(), debug: true }, input())).toThrowError(/无额外顶层字段/);
@@ -109,7 +117,7 @@ describe('validateProfileOutput', () => {
   });
   it('证据 sourceId 不属于来源块拒绝；捏造引文拒绝', () => {
     expect(() => validateProfileOutput(profile({ price: claim('99 元', 'observed', [{ sourceId: 'b99', quote: 'x' }]) }), blocks)).toThrowError(/不属于来源块/);
-    expect(() => validateProfileOutput(profile({ price: claim('99 元', 'observed', [{ sourceId: 'b01', quote: '价格 199 元' }]) }), blocks)).toThrowError(/连续原文/);
+    expect(() => validateProfileOutput(profile({ price: claim('99 元', 'observed', [{ sourceId: 'b01', quote: '价格 199 元' }]) }), blocks)).toThrowError(/连续段/);
   });
   it('unknown 必须 null（schema refine）', () => {
     expect(() => validateProfileOutput(profile({ purchaseChannel: claim('私信', 'unknown') }), blocks)).toThrowError();
