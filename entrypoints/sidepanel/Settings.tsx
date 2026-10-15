@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { browser } from 'wxt/browser';
 import {
-  PROVIDER_PRESETS, clearCredential, loadCredential, saveCredential, type PresetId,
+  PROVIDER_PRESETS, clearCredential, loadCredential, resolveBaseUrl, saveCredential, type PresetId,
 } from '../../src/storage/credentials';
 import { requestProviderOrigin } from '../../src/messaging/handlers';
 import { getDb } from '../../src/storage/db';
@@ -110,6 +110,7 @@ function UsageSection() {
 export default function Settings() {
   const [presetId] = useState<PresetId>('bailian');
   const [model, setModel] = useState(PROVIDER_PRESETS[presetId].defaultModel);
+  const [baseUrl, setBaseUrl] = useState(PROVIDER_PRESETS[presetId].baseUrl);
   const [apiKey, setApiKey] = useState('');
   const [remember, setRemember] = useState(false);
   const [status, setStatus] = useState('');
@@ -118,6 +119,7 @@ export default function Settings() {
     loadCredential().then((cred) => {
       if (cred) {
         setModel(cred.model);
+        setBaseUrl(resolveBaseUrl(cred));
         setRemember(cred.remember);
         setApiKey(cred.apiKey);
         setStatus(`已加载 Key（${cred.remember ? '本地记住' : '仅本会话'}）`);
@@ -130,6 +132,14 @@ export default function Settings() {
       <section style={{ display: 'grid', gap: 8 }}>
         <h2 style={{ fontSize: 14, margin: 0 }}>模型与 Key</h2>
         <p style={{ margin: 0 }}>{PROVIDER_PRESETS[presetId].label}</p>
+        <label>
+          Base URL
+          <select value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} style={{ width: '100%' }}>
+            {PROVIDER_PRESETS[presetId].endpoints.map((ep) => (
+              <option key={ep.baseUrl} value={ep.baseUrl}>{ep.label}：{ep.baseUrl}</option>
+            ))}
+          </select>
+        </label>
         <label>
           模型名称
           <input value={model} onChange={(e) => setModel(e.target.value)} style={{ width: '100%' }} />
@@ -147,7 +157,7 @@ export default function Settings() {
             onClick={async () => {
               if (!apiKey.trim()) { setStatus('请先输入 Key'); return; }
               try {
-                await saveCredential({ presetId, apiKey: apiKey.trim(), model: model.trim(), remember });
+                await saveCredential({ presetId, apiKey: apiKey.trim(), model: model.trim(), remember, baseUrl });
                 setStatus(`已保存（${remember ? 'storage.local' : 'storage.session'}）`);
               } catch (err) {
                 setStatus(`保存失败：${err instanceof Error ? err.message.slice(0, 200) : '未知错误'}`);
@@ -181,7 +191,7 @@ export default function Settings() {
               const cred = await loadCredential();
               if (!cred?.apiKey.trim()) { setStatus('连接测试失败：尚未配置 API Key'); return; }
               try {
-                const res = await fetch(`${PROVIDER_PRESETS[cred.presetId].baseUrl}/chat/completions`, {
+                const res = await fetch(`${resolveBaseUrl(cred)}/chat/completions`, {
                   method: 'POST', credentials: 'omit',
                   headers: { 'content-type': 'application/json', authorization: `Bearer ${cred.apiKey.trim()}` },
                   body: JSON.stringify({ model: cred.model, messages: [{ role: 'user', content: 'ping' }], max_tokens: 1 }),

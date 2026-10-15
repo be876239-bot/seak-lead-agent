@@ -2,12 +2,18 @@ import { browser } from 'wxt/browser';
 
 export type PresetId = 'bailian';
 
-export const PROVIDER_PRESETS: Record<PresetId, { label: string; baseUrl: string; defaultModel: string; origins: string[] }> = {
+export const PROVIDER_PRESETS: Record<PresetId, {
+  label: string; baseUrl: string; defaultModel: string; origins: string[]; endpoints: { label: string; baseUrl: string }[];
+}> = {
   bailian: {
     label: '阿里云百炼（OpenAI 兼容）',
     baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     defaultModel: 'qwen3.8-flash',
-    origins: ['https://dashscope.aliyuncs.com/*'],
+    origins: ['https://dashscope.aliyuncs.com/*', 'https://dashscope-intl.aliyuncs.com/*'],
+    endpoints: [
+      { label: '国内（默认）', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1' },
+      { label: '国际站', baseUrl: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1' },
+    ],
   },
 };
 
@@ -16,7 +22,18 @@ export type Credential = {
   apiKey: string;
   model: string;
   remember: boolean;
+  baseUrl?: string;
 };
+
+/** DEVELOPMENT.md 4.2：AI 请求只允许供应商预设域名，不接受任意 Base URL。 */
+export function isAllowedBaseUrl(presetId: PresetId, baseUrl: string): boolean {
+  return PROVIDER_PRESETS[presetId].endpoints.some((e) => e.baseUrl === baseUrl);
+}
+
+export function resolveBaseUrl(cred: { presetId: PresetId; baseUrl?: string }): string {
+  const preset = PROVIDER_PRESETS[cred.presetId];
+  return cred.baseUrl && isAllowedBaseUrl(cred.presetId, cred.baseUrl) ? cred.baseUrl : preset.baseUrl;
+}
 
 const KEY = 'crd' as const;
 

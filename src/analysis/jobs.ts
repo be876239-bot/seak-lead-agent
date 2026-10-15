@@ -5,7 +5,7 @@ import type { Job } from '../domain/schemas';
 import { registerSensitiveHandler } from '../messaging/handlers';
 import { readRenderedProduct } from '../product/render-reader';
 import { collectProductSources } from '../product/service';
-import { PROVIDER_PRESETS, loadCredential } from '../storage/credentials';
+import { loadCredential, resolveBaseUrl } from '../storage/credentials';
 import { getDb } from '../storage/db';
 import { Repositories } from '../storage/repositories';
 import { captureNote } from '../xhs/capture';
@@ -21,8 +21,8 @@ const nowIso = () => new Date().toISOString();
 async function makeDeps(): Promise<RunnerDeps> {
   const cred = await loadCredential();
   if (!cred || !cred.apiKey.trim()) throw new AppError('AI_AUTH', '未配置 API Key，请先在设置页保存');
-  const preset = PROVIDER_PRESETS[cred.presetId];
-  const provider = getProvider({ apiKey: cred.apiKey.trim(), baseUrl: preset.baseUrl, model: cred.model });
+  const baseUrl = resolveBaseUrl(cred);
+  const provider = getProvider({ apiKey: cred.apiKey.trim(), baseUrl, model: cred.model });
   return { repos: analysisRepos, provider, lock: analysisLock, providerName: cred.presetId, modelId: cred.model };
 }
 
