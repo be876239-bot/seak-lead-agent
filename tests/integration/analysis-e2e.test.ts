@@ -51,7 +51,7 @@ let lock: TaskLockManager;
 let session: XhsSessionManager;
 
 function deps(provider: MockProvider): RunnerDeps {
-  return { repos, provider, lock, providerName: 'mock', modelId: 'mock-model' };
+  return { repos, provider, lock, providerName: 'mock', modelId: 'mock-model', retryDelayMs: 0 };
 }
 
 beforeEach(() => {

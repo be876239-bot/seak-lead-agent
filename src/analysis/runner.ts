@@ -23,7 +23,11 @@ export type RunnerDeps = {
   lock: TaskLockManager;
   providerName: string;
   modelId: string;
+  /** 可重试错误的自动重试延迟；集成测试注入 0 以免变慢。 */
+  retryDelayMs?: number;
 };
+
+const DEFAULT_RETRY_DELAY_MS = 1500;
 
 export type ProgressInfo = {
   jobId: string;
@@ -112,6 +116,7 @@ async function classifyWithRepair(
   log?: (m: string) => void,
 ): Promise<{ resp: AIResponse; validated: ValidatedResult[]; durationMs: number }> {
   const mk = mkUsage({ jobId, batchId: row.id, deps });
+  const delay = deps.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS;
   let attemptIndex = 0;
   let repair: RepairTurn | undefined;
   let retryableRetried = false;
@@ -132,7 +137,8 @@ async function classifyWithRepair(
       if (e.retryable && !retryableRetried && !handle.signal.aborted) {
         retryableRetried = true;
         attemptIndex += 1;
-        log?.(`模型调用失败（${e.code}），自动重试 1 次…`);
+        log?.(`模型调用失败（${e.code}：${e.message.slice(0, 80)}），${Math.round(delay / 1000)} 秒后自动重试 1 次…`);
+        if (delay > 0) await new Promise((r) => setTimeout(r, delay));
         continue;
       }
       throw e;
@@ -267,7 +273,9 @@ async function executeRows(
       outcome.failedItems += comments.length;
       outcome.firstError ??= e.code;
       await deps.repos.updateBatch(row.id, { status: 'failed', errorCode: e.code });
-      log?.(`批次 ${row.index + 1}/${total} 失败：${e.code}`);
+      // AI_INVALID_OUTPUT 的报错正文含引文（可能是评论文本），日志只记错误码
+      log?.(`批次 ${row.index + 1}/${total} 失败：${e.code}`
+        + `${e.code === 'AI_INVALID_OUTPUT' ? '' : `（${e.message.slice(0, 80)}）`}`);
       if (e.code === 'AI_AUTH') {
         await stopRemaining('interrupted');
         break;
@@ -436,6 +444,7 @@ export async function runProfileGeneration(
 
     let profile!: ProductProfile;
     let resp!: AIResponse;
+    const retryDelay = deps.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS;
     let attemptIndex = 0;
     let repair: RepairTurn | undefined;
     let retryableRetried = false;
@@ -454,7 +463,8 @@ export async function runProfileGeneration(
         if (e.code === 'CANCELLED' || !(e.retryable && !retryableRetried)) throw e;
         retryableRetried = true;
         attemptIndex += 1;
-        spec.log?.(`模型调用失败（${e.code}），自动重试 1 次…`);
+        spec.log?.(`模型调用失败（${e.code}：${e.message.slice(0, 80)}），${Math.round(retryDelay / 1000)} 秒后自动重试 1 次…`);
+        if (retryDelay > 0) await new Promise((r) => setTimeout(r, retryDelay));
         continue;
       }
       attemptIndex += 1;

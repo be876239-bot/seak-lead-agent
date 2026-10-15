@@ -46,7 +46,9 @@ export class BailianProvider implements AIProvider {
       if (err instanceof Error && err.name === 'AbortError') {
         throw new AppError('AI_TIMEOUT', `模型请求超时（>${LIMITS.aiTimeoutMs / 1000}s）`, true);
       }
-      throw new AppError('AI_TIMEOUT', '网络或模型服务连接失败，可稍后重试', true);
+      // 保留底层报错（如 Failed to fetch / net:: 错误名），否则真机上无法区分断网、权限失效与服务拒绝
+      const raw = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+      throw new AppError('AI_TIMEOUT', `网络或模型服务连接失败（${raw.slice(0, 120)}），可稍后重试`, true);
     } finally {
       clearTimeout(timer);
       signal.removeEventListener('abort', onExternal);
