@@ -4,9 +4,11 @@ import type { Group, Product } from '../../src/domain/schemas';
 import { buildLeadsExport, leadsToCsvRows } from '../../src/export/json';
 import { csvWithBom, downloadText, toCsv } from '../../src/export/csv';
 import {
-  buildLeadGroups, GROUP_ORDER, GROUP_TITLES, isJobActive, jobPhaseLabel, safeExternalUrl,
+  buildLeadGroups, GROUP_ORDER, GROUP_TITLES, INTENT_TARGET_CN, isJobActive, jobPhaseLabel,
+  PRODUCT_FIT_CN, safeExternalUrl,
   type LeadView,
 } from '../../src/ui/logic';
+import { needsTargetBadge } from '../../src/domain/classification';
 import { getSelectedProductId, ui } from '../../src/ui/store';
 
 type Filters = { group: Group | 'all'; handled: 'all' | 'handled' | 'unhandled'; query: string };
@@ -164,7 +166,14 @@ export default function Leads() {
             </div>
             <div>{v.comment.text}</div>
             <div><b>{v.analysis.decision.needSummary}</b>
-              <span style={{ color: '#777', marginLeft: 6 }}>意向：{v.analysis.decision.intentTarget} · 匹配：{v.analysis.decision.productFit}</span>
+              <span style={{ color: '#777', marginLeft: 6 }}>
+                意向：{INTENT_TARGET_CN[v.analysis.decision.intentTarget]} · 匹配：{PRODUCT_FIT_CN[v.analysis.decision.productFit]}
+              </span>
+              {needsTargetBadge(v.analysis.decision) && (
+                <span style={{ color: '#b60', marginLeft: 4 }}>
+                  （{needsTargetBadge(v.analysis.decision) === 'competitor' ? '指向竞品，并非本产品' : '指向品类，未指名产品'}）
+                </span>
+              )}
             </div>
             {v.analysis.decision.evidence.length > 0 && (
               <div style={{ color: '#999', fontSize: 12 }}>证据：{v.analysis.decision.evidence.map((e) => e.quote).join(' / ')}</div>

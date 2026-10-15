@@ -6,9 +6,11 @@ import { toErrorPayload } from '../../src/domain/errors';
 import { getNoteStatus } from '../../src/xhs/capture';
 import type { XhsStatusPayload } from '../../src/messaging/protocol';
 import {
-  buildLeadGroups, GROUP_ORDER, GROUP_TITLES, isJobActive, isRetryableJob, jobPhaseLabel, safeExternalUrl,
+  buildLeadGroups, GROUP_ORDER, GROUP_TITLES, INTENT_TARGET_CN, isJobActive, isRetryableJob,
+  jobPhaseLabel, safeExternalUrl,
   type LeadView,
 } from '../../src/ui/logic';
+import { needsTargetBadge } from '../../src/domain/classification';
 import { getSelectedProductId, ui } from '../../src/ui/store';
 import { emitLocalJobLog } from '../../src/ui/joblog';
 import JobLogPanel from './JobLog';
@@ -24,13 +26,19 @@ function ItemCard({ view, product, onToggleHandled }: {
   view: LeadView; product: Product; onToggleHandled: (v: LeadView) => void;
 }) {
   const stale = view.analysis.profileVersion !== product.profileVersion;
+  const badge = needsTargetBadge(view.analysis.decision);
   const url = safeExternalUrl(view.comment.profileUrl); // 不自动打开，也只给合法链接
   return (
     <div style={{ border: '1px solid #eee', borderRadius: 6, padding: 6, fontSize: 12 }}>
       <div style={{ color: '#444' }}>{view.comment.text}</div>
       <div style={{ marginTop: 4 }}>
         <b>{view.analysis.decision.needSummary}</b>
-        <span style={{ color: '#777', marginLeft: 6 }}>意向对象：{view.analysis.decision.intentTarget}</span>
+        <span style={{ color: '#777', marginLeft: 6 }}>意向对象：{INTENT_TARGET_CN[view.analysis.decision.intentTarget]}</span>
+        {badge && (
+          <span style={{ color: '#b60', marginLeft: 6 }}>
+            （{badge === 'competitor' ? '指向竞品，并非本产品' : '指向品类，未指名产品'}）
+          </span>
+        )}
       </div>
       {view.analysis.decision.evidence.length > 0 && (
         <div style={{ color: '#999' }}>证据：{view.analysis.decision.evidence.map((e) => e.quote).join(' / ')}</div>
@@ -238,6 +246,18 @@ export default function CurrentNote() {
         <p style={{ color: '#777', margin: 0 }}>本次需要新增 AI 分析的评论：{job.totalItems} 条（其余命中缓存，不重复计费）。</p>
       )}
 
+      {groups && (
+        <details style={{ fontSize: 11, color: '#666' }}>
+          <summary>分组依据（group-v1 固定规则：模型只判断字段，分组不由模型决定）</summary>
+          <p style={{ margin: '4px 0 0' }}>
+            高意向＝五个条件同时满足：与本笔记产品直接相关＋有需求（明确或隐含）＋本产品可支持＋发言者是需求方＋有购买或问价信号，且本条评论自带证据。
+            有需求＝前三条满足，但缺购买/问价信号或本条证据不足。
+            口碑/讨论＝相关性只是周边、字段判断不了（需求/匹配未知）、模型标记了不确定、或发言身份存疑。
+            排除项＝无关、卖方推广、本产品不支持、或判断为没有需求。
+            觉得判错请用“修改分组/备注”纠正（不改变模型原判，纠正样本用于准确率评测）。
+          </p>
+        </details>
+      )}
       {groups && GROUP_ORDER.map((g) => (
         <section key={g} style={{ border: '1px solid #ddd', borderRadius: 6, padding: 8 }}>
           <h3 style={{ margin: '0 0 6px', fontSize: 13 }}>{GROUP_TITLES[g]}（{groups[g]?.length ?? 0}）</h3>

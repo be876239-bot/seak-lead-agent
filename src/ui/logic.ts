@@ -1,8 +1,16 @@
-import type { Analysis, Claim, Comment, Feedback, Group, Job, LeadState, Usage } from '../domain/schemas';
+import type { Analysis, Claim, Comment, Decision, Feedback, Group, Job, LeadState, Usage } from '../domain/schemas';
 
 export const GROUP_ORDER: Group[] = ['high_intent', 'need', 'review', 'excluded'];
 export const GROUP_TITLES: Record<Group, string> = {
   high_intent: '高意向', need: '有需求', review: '口碑/讨论', excluded: '排除项',
+};
+
+/** 枚举值以英文存库、属协议一部分不能改；界面一律映射为中文展示。 */
+export const INTENT_TARGET_CN: Record<Decision['intentTarget'], string> = {
+  our_product: '本产品', category: '品类（未指名产品）', competitor: '竞品', unknown: '未知',
+};
+export const PRODUCT_FIT_CN: Record<Decision['productFit'], string> = {
+  supported: '本产品可支持', unsupported: '本产品不支持', unknown: '未知',
 };
 
 export const STATUS_LABELS: Record<Claim['status'], string> = {
