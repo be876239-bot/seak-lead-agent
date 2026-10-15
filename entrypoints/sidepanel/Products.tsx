@@ -17,6 +17,21 @@ const CLAIM_ROWS: { key: 'name' | 'category' | 'summary' | 'accessMethod' | 'pri
   { key: 'purchaseChannel', label: '购买渠道' },
 ];
 
+function urlKey(raw: string): string {
+  try {
+    const u = new URL(raw.trim());
+    u.hash = '';
+    u.search = '';
+    return u.href;
+  } catch {
+    return raw.trim();
+  }
+}
+
+function hostOf(u: string): string {
+  try { return new URL(u).host; } catch { return u; }
+}
+
 const LIST_ROWS = [
   { key: 'capabilities', label: '能力' },
   { key: 'targetAudience', label: '目标人群' },
@@ -83,6 +98,7 @@ export default function Products() {
   const [jobId, setJobId] = useState<string | null>(null);
   const [job, setJob] = useState<Job | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
   const pollRef = useRef<number | null>(null);
 
   const refresh = useCallback(async () => {
@@ -121,8 +137,9 @@ export default function Products() {
     };
   }, [jobId, refresh]);
 
-  const start = async () => {
+  const start = async (existingProductId?: string) => {
     setError(null);
+    setInfo(null);
     if (!url.trim()) { setError('请先粘贴产品页链接'); return; }
     let origin: string;
     try {
@@ -151,7 +168,7 @@ export default function Products() {
     });
     setJobId(jobIdNew);
     try {
-      await sendRequest('PRODUCT_CREATE', { jobId: jobIdNew, url: url.trim() });
+      await sendRequest('PRODUCT_CREATE', { jobId: jobIdNew, url: url.trim(), existingProductId });
     } catch (err) {
       const e = toErrorPayload(err);
       setError(e.message);
@@ -181,7 +198,18 @@ export default function Products() {
     await refresh();
   };
 
+  const reuse = async (p: Product) => {
+    setSelectedId(p.id);
+    setExpandedId(p.id);
+    await setSelectedProductId(p.id);
+    setInfo(`已选为当前产品：${p.profile.name.value ?? hostOf(p.inputUrl)}（画像 v${p.profileVersion}，未调用模型、不产生费用）。`);
+  };
+
   const busy = isJobActive(job);
+  const key = url.trim() ? urlKey(url) : '';
+  const match = !busy && key
+    ? products.find((p) => urlKey(p.inputUrl) === key || urlKey(p.finalUrl) === key)
+    : undefined;
   return (
     <div style={{ display: 'grid', gap: 10, fontSize: 13 }}>
       <div style={{ display: 'flex', gap: 6 }}>
@@ -203,6 +231,16 @@ export default function Products() {
         </p>
       )}
       {error && <p style={{ color: '#c00', margin: 0 }}>{error}</p>}
+      {info && <p style={{ color: '#0a7', margin: 0 }}>{info}</p>}
+      {match && (
+        <div style={{ background: '#f0f7ff', border: '1px solid #91d5ff', borderRadius: 6, padding: 8, fontSize: 12 }}>
+          这个链接已识别过：{match.profile.name.value ?? hostOf(match.inputUrl)}（画像 v{match.profileVersion}，{match.updatedAt.slice(0, 16).replace('T', ' ')} 更新）。
+          <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
+            <button onClick={() => void reuse(match)}>直接复用（不调用模型）</button>
+            <button onClick={() => void start(match.id)}>重新识别（更新同一产品，会调用模型）</button>
+          </div>
+        </div>
+      )}
       <JobLogPanel jobId={jobId} />
       {products.length === 0 && !busy && <p style={{ color: '#777' }}>还没有产品：贴上链接即可自动识别，无需填写问卷。</p>}
       {products.map((p) => {
@@ -234,6 +272,26 @@ export default function Products() {
           </div>
         );
       })}
+      {products.length > 0 && (
+        <section style={{ display: 'grid', gap: 4, borderTop: '1px solid #eee', paddingTop: 8 }}>
+          <b style={{ fontSize: 12 }}>历史记录（最近 5 条）</b>
+          {[...products]
+            .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+            .slice(0, 5)
+            .map((p) => (
+              <div key={p.id} style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 12 }}>
+                <button onClick={() => void reuse(p)} style={{ flex: 1, textAlign: 'left' }}>
+                  {selectedId === p.id ? '● ' : '○ '}
+                  {p.profile.name.value ?? hostOf(p.inputUrl)}（画像 v{p.profileVersion}）
+                </button>
+                <span style={{ color: '#999' }}>{p.updatedAt.slice(0, 16).replace('T', ' ')}</span>
+              </div>
+            ))}
+          <p style={{ color: '#888', margin: 0, fontSize: 11 }}>
+            点记录即选为当前产品（不花费用）；画像保存在本机 IndexedDB，删除产品才会清除。
+          </p>
+        </section>
+      )}
     </div>
   );
 }
