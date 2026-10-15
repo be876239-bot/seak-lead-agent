@@ -19,7 +19,7 @@ async function ask(tabId: number, req: Request): Promise<unknown> {
   try {
     raw = await browser.tabs.sendMessage(tabId, req);
   } catch {
-    throw new AppError('PAGE_UNSUPPORTED', '无法连接笔记页面脚本：请切换到已打开的小红书笔记标签页重试', true);
+    throw new AppError('PAGE_UNSUPPORTED', '无法连接笔记页面脚本：请刷新该小红书标签页后重试（扩展重新加载后旧标签页的脚本会失效）', true);
   }
   const res = ResponseSchema.safeParse(raw);
   if (!res.success) throw new AppError('PARSE_FAILED', '页面脚本返回了非法响应');
