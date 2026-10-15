@@ -4,6 +4,8 @@ import type { Job, Product } from '../../src/domain/schemas';
 import { sendRequest } from '../../src/messaging/client';
 import { toErrorPayload } from '../../src/domain/errors';
 import { jobPhaseLabel, isJobActive, STATUS_LABELS, profileUnknownLabels } from '../../src/ui/logic';
+import { emitLocalJobLog } from '../../src/ui/joblog';
+import JobLogPanel from './JobLog';
 import { getSelectedProductId, setSelectedProductId, ui } from '../../src/ui/store';
 
 const CLAIM_ROWS: { key: 'name' | 'category' | 'summary' | 'accessMethod' | 'price' | 'purchaseChannel'; label: string }[] = [
@@ -153,6 +155,7 @@ export default function Products() {
     } catch (err) {
       const e = toErrorPayload(err);
       setError(e.message);
+      emitLocalJobLog(jobIdNew, `启动失败：${e.code} ${e.message.slice(0, 200)}`, 'error');
     }
   };
 
@@ -200,6 +203,7 @@ export default function Products() {
         </p>
       )}
       {error && <p style={{ color: '#c00', margin: 0 }}>{error}</p>}
+      <JobLogPanel jobId={jobId} />
       {products.length === 0 && !busy && <p style={{ color: '#777' }}>还没有产品：贴上链接即可自动识别，无需填写问卷。</p>}
       {products.map((p) => {
         const name = p.profile.name.value ?? p.inputUrl;

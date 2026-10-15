@@ -9,6 +9,7 @@ import {
   RETENTION_CHOICES, ensureDailyRetention, getRetentionDays, hasActiveJobs, purgeExpired,
 } from '../../src/storage/retention';
 import { estimateCny, summarizeUsage, type PriceConfig } from '../../src/ui/logic';
+import { isLogPanelEnabled, setLogPanelEnabled } from '../../src/ui/joblog';
 import { ui } from '../../src/ui/store';
 
 const PRICE_KEY = 'pricing.config';
@@ -113,9 +114,11 @@ export default function Settings() {
   const [baseUrl, setBaseUrl] = useState(PROVIDER_PRESETS[presetId].baseUrl);
   const [apiKey, setApiKey] = useState('');
   const [remember, setRemember] = useState(false);
+  const [logPanel, setLogPanel] = useState(false);
   const [status, setStatus] = useState('');
 
   useEffect(() => {
+    void isLogPanelEnabled().then(setLogPanel);
     loadCredential().then((cred) => {
       if (cred) {
         setModel(cred.model);
@@ -151,6 +154,13 @@ export default function Settings() {
         <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
           <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
           在此浏览器记住 Key（不勾选则仅当前会话有效）
+        </label>
+        <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <input
+            type="checkbox" checked={logPanel}
+            onChange={(e) => { setLogPanel(e.target.checked); void setLogPanelEnabled(e.target.checked); }}
+          />
+          在产品页与当前笔记页显示任务日志框（默认关闭；只记录步骤、进度与错误码，不含评论正文和 Key）
         </label>
         <div style={{ display: 'flex', gap: 8 }}>
           <button

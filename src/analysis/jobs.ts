@@ -8,6 +8,7 @@ import { collectProductSources } from '../product/service';
 import { loadCredential, resolveBaseUrl } from '../storage/credentials';
 import { getDb } from '../storage/db';
 import { Repositories } from '../storage/repositories';
+import { emitJobLog } from '../ui/joblog';
 import { captureNote } from '../xhs/capture';
 import { TaskLockManager } from './lock';
 import { retryCommentsJob, runCommentsJob, runProfileGeneration, type RunnerDeps } from './runner';
@@ -55,21 +56,33 @@ async function markFailedIfOpen(jobId: string, code: string): Promise<void> {
   });
 }
 
+function failLog(jobId: string, err: unknown): void {
+  const e = toErrorPayload(err);
+  emitJobLog(jobId, `失败：${e.code} ${e.message.slice(0, 200)}`, 'error');
+}
+
 export function registerAnalysisHandlers(): void {
   registerSensitiveHandler('PRODUCT_CREATE', async (req) => {
     if (req.type !== 'PRODUCT_CREATE') throw new Error('类型错误');
     const { jobId, url, existingProductId } = req.payload;
     const deps = await makeDeps();
     await upsertJob({ ...baseJob(deps, jobId), productId: existingProductId ?? null });
+    emitJobLog(jobId, `任务开始（模型 ${deps.modelId}）；读取产品页 ${new URL(url).host}`);
     try {
       const sources = await collectProductSources(url, jobId, undefined,
         (jid, u) => readRenderedProduct(jid, u));
+      emitJobLog(jobId,
+        `页面读取完成：${sources.blocks.length} 个来源块 / ${sources.totalChars} 字符`
+        + `${sources.renderUsed ? '（含渲染兜底）' : ''}${sources.truncated ? '（已截断）' : ''}${sources.degraded ? '（降级读取）' : ''}`);
+      emitJobLog(jobId, '提交模型生成产品画像（格式错误最多修复一次）');
       const product = await runProfileGeneration(deps, {
         jobId, inputUrl: sources.inputUrl, finalUrl: sources.finalUrl,
         blocks: sources.blocks, existingProductId,
       });
+      emitJobLog(jobId, `画像已保存（产品 ${product.id}，画像版本 ${product.profileVersion}）`);
       return { jobId, productId: product.id };
     } catch (err) {
+      failLog(jobId, err);
       await markFailedIfOpen(jobId, toErrorPayload(err).code);
       throw err;
     }
@@ -85,19 +98,29 @@ export function registerAnalysisHandlers(): void {
       ...baseJob(deps, jobId), kind: 'comments', tabId, productId,
       totalItems: 0, promptVersion: COMMENT_PROMPT_VERSION,
     });
+    emitJobLog(jobId, `任务开始（模型 ${deps.modelId}）；读取当前页已加载评论`);
     const flag = { cancelled: false };
     capturing.set(jobId, flag);
     void (async () => {
       const snap = await captureNote(tabId);
       if (flag.cancelled) {
+        emitJobLog(jobId, '采集阶段被取消');
         await analysisRepos.updateJob(jobId, { status: 'cancelled', errorCode: 'CANCELLED' });
         return;
       }
+      emitJobLog(jobId, `已读取 ${snap.comments.length} 条已加载评论${snap.truncated ? '（超出上限，仅部分）' : ''}`);
       await analysisRepos.putNote(snap.note);
       await analysisRepos.putComments(snap.comments);
-      await runCommentsJob(deps, { productId, note: snap.note, comments: snap.comments, jobId, tabId });
-    })().catch(async (err) => {
-      await markFailedIfOpen(jobId, toErrorPayload(err).code);
+      const job = await runCommentsJob(deps, {
+        productId, note: snap.note, comments: snap.comments, jobId, tabId,
+        onProgress: (p) => emitJobLog(jobId,
+          `批次进度：${p.completedBatches + p.failedBatches}/${p.totalBatches}`
+          + `（成功 ${p.completedBatches}，失败 ${p.failedBatches}）`),
+      });
+      emitJobLog(jobId, `任务结束：${job.status}${job.errorCode ? `（${job.errorCode}）` : ''}`);
+    })().catch((err) => {
+      failLog(jobId, err);
+      return markFailedIfOpen(jobId, toErrorPayload(err).code);
     }).finally(() => {
       capturing.delete(jobId);
     });
@@ -131,8 +154,16 @@ export function registerAnalysisHandlers(): void {
   registerSensitiveHandler('JOB_RETRY', async (req) => {
     if (req.type !== 'JOB_RETRY') throw new Error('类型错误');
     const deps = await makeDeps();
-    void retryCommentsJob(deps, req.payload.jobId).catch(async (err) => {
-      await markFailedIfOpen(req.payload.jobId, toErrorPayload(err).code);
+    emitJobLog(req.payload.jobId, '手动重试：只重跑失败或中断的批次');
+    void retryCommentsJob(deps, req.payload.jobId, (p) => {
+      emitJobLog(req.payload.jobId,
+        `批次进度：${p.completedBatches + p.failedBatches}/${p.totalBatches}`
+        + `（成功 ${p.completedBatches}，失败 ${p.failedBatches}）`);
+    }).then((job) => {
+      emitJobLog(req.payload.jobId, `任务结束：${job.status}${job.errorCode ? `（${job.errorCode}）` : ''}`);
+    }).catch((err) => {
+      failLog(req.payload.jobId, err);
+      return markFailedIfOpen(req.payload.jobId, toErrorPayload(err).code);
     });
     return { jobId: req.payload.jobId };
   });

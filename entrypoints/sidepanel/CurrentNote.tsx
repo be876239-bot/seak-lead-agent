@@ -10,6 +10,8 @@ import {
   type LeadView,
 } from '../../src/ui/logic';
 import { getSelectedProductId, ui } from '../../src/ui/store';
+import { emitLocalJobLog } from '../../src/ui/joblog';
+import JobLogPanel from './JobLog';
 
 const JOB_KEY = 'note.lastJobId';
 
@@ -154,6 +156,7 @@ export default function CurrentNote() {
     } catch (err) {
       const e = toErrorPayload(err);
       setError(e.message);
+      emitLocalJobLog(jobId, `启动失败：${e.code} ${e.message.slice(0, 200)}`, 'error');
     }
   };
 
@@ -225,6 +228,7 @@ export default function CurrentNote() {
         <p style={{ color: '#777', margin: 0 }}>页面没有已加载评论：请先在笔记页手动展开评论区再分析。</p>
       )}
       {error && <p style={{ color: '#c00', margin: 0 }}>{error}</p>}
+      <JobLogPanel jobId={job?.id ?? null} />
       {job?.noteKey && groups && loadedCount !== null && loadedCount > 0 && (
         <p style={{ color: '#777', margin: 0 }}>本次需要新增 AI 分析的评论：{job.totalItems} 条（其余命中缓存，不重复计费）。</p>
       )}
