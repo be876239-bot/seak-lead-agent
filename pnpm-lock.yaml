@@ -33,6 +33,9 @@ importers:
       '@eslint/js':
         specifier: ^9.37.0
         version: 9.39.5
+      '@types/jsdom':
+        specifier: ^30.0.0
+        version: 30.0.0
       '@types/papaparse':
         specifier: ^5.5.0
         version: 5.5.2
@@ -641,6 +644,9 @@ packages:
   '@types/har-format@1.2.16':
     resolution: {integrity: sha512-fluxdy7ryD3MV6h8pTfTYpy/xQzCFC7m89nOH9y94cNqJ1mDIDPut7MnRHI3F6qRmh/cT2fUjG1MLdCNb4hE9A==}
 
+  '@types/jsdom@30.0.0':
+    resolution: {integrity: sha512-uAHGxujGE0cDaKGdK28zgDotFtNA7MKq5DXl8LrfdxdCI8VHcg15oJz+amHTChPNI5JpgEPQWc2xFdrw3em/nQ==}
+
   '@types/json-schema@7.0.15':
     resolution: {integrity: sha512-5+fP8P8MFNC+AyZCDxrB2pkZFPGzqQWUzpSeuuVLvm8VMcorNYavBqoFcxK8bQz4Qsbn4oUEEem4wDLfcysGHA==}
 
@@ -657,6 +663,9 @@ packages:
 
   '@types/react@19.3.0':
     resolution: {integrity: sha512-N0rFCuH9YoxG9/m61l9MfpJKfmLOVU0em7ipIz6TRgSSkvReLB9vL85GB+yr8Bs5leqpvg96JSwF4ZS1s4viQg==}
+
+  '@types/tough-cookie@4.0.5':
+    resolution: {integrity: sha512-/Ad8+nIOV7Rl++6f1BdKxFSMgmoqEoYbHRpPcx3JEfv8VRsQe9Z4mCXeJBzxs7mbHY/XOZZuXlRNfhpVPbs6ZA==}
 
   '@typescript-eslint/eslint-plugin@8.71.2':
     resolution: {integrity: sha512-K72/pvT7qpm8q3k8G5u93NCSN1RcLxX5h7Gw0bQpbMXviBHeY6Nx1WEwmk9wP+eKTSQ8ecxvcgt/ZX/rB938xQ==}
@@ -2330,6 +2339,13 @@ snapshots:
 
   '@types/har-format@1.2.16': {}
 
+  '@types/jsdom@30.0.0':
+    dependencies:
+      '@types/node': 26.6.5
+      '@types/tough-cookie': 4.0.5
+      parse5: 8.0.1
+      undici-types: 8.9.0
+
   '@types/json-schema@7.0.15': {}
 
   '@types/node@26.6.5':
@@ -2347,6 +2363,8 @@ snapshots:
   '@types/react@19.3.0':
     dependencies:
       csstype: 3.2.3
+
+  '@types/tough-cookie@4.0.5': {}
 
   '@typescript-eslint/eslint-plugin@8.71.2(@typescript-eslint/parser@8.71.2(eslint@9.39.5(jiti@2.7.0))(typescript@5.9.3))(eslint@9.39.5(jiti@2.7.0))(typescript@5.9.3)':
     dependencies:

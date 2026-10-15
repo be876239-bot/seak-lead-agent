@@ -48,6 +48,7 @@ export const XhsStatusPayload = z.object({
   supported: z.boolean(),
   blocked: z.boolean(),
 });
+export type XhsStatusPayload = z.infer<typeof XhsStatusPayload>;
 
 export const SnapshotPayload = z.object({
   sessionId: z.string().max(64),
@@ -60,6 +61,7 @@ export const SnapshotPayload = z.object({
   truncated: z.boolean(),
   nextCursor: z.string().max(256).nullable(),
 });
+export type SnapshotPayload = z.infer<typeof SnapshotPayload>;
 
 export const ProductReadRenderedPayload = z.object({
   jobId: z.string().uuid(),

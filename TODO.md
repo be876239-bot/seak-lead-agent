@@ -2,7 +2,7 @@
 
 创建：2026-10-15。配套规范：`DEVELOPMENT.md`。
 
-**当前状态：仅完成需求与技术文档；下方开发任务全部尚未执行。**
+**当前状态：G0、G1 已完成（T01–T09、T11–T14）；下一阶段 G2（T15–T22，T10 归入 G2）。真实浏览器验收（T28–T33）尚未开始。**
 
 ## 给接手 AI 的执行指令
 
@@ -131,7 +131,7 @@ G0 检查：
 
 ### T07 — URL 策略与静态页面抽取
 
-- [ ] T07 完成并记录
+- [x] T07 完成并记录
 
 依赖：T03、T05、T06。
 
@@ -143,7 +143,7 @@ G0 检查：
 
 ### T08 — 动态页面渲染读取
 
-- [ ] T08 完成并记录
+- [x] T08 完成并记录
 
 依赖：T07。
 
@@ -155,7 +155,7 @@ G0 检查：
 
 ### T09 — 产品来源编排与有限补读
 
-- [ ] T09 完成并记录
+- [x] T09 完成并记录
 
 依赖：T08。
 
@@ -193,7 +193,7 @@ G0 检查：
 
 ### T12 — 纯 DOM 解析器
 
-- [ ] T12 完成并记录
+- [x] T12 完成并记录
 
 依赖：T11。
 
@@ -205,7 +205,7 @@ G0 检查：
 
 ### T13 — 身份、去重与上下文
 
-- [ ] T13 完成并记录
+- [x] T13 完成并记录
 
 依赖：T12。
 
@@ -217,7 +217,7 @@ G0 检查：
 
 ### T14 — 内容脚本会话与路由变更
 
-- [ ] T14 完成并记录
+- [x] T14 完成并记录
 
 依赖：T06、T12、T13。
 
@@ -230,9 +230,9 @@ G0 检查：
 验收：只采集用户已加载评论；不自动滚动/展开；虚拟列表移除前的评论保留；刷新/切帖不串；无面板心跳 60 秒结束；验证码/登录遮挡停止。
 
 G1 检查：
-- [ ] 示例产品页面读取有真实证据。
-- [ ] 当前小红书 DOM 提取有真实证据和 fixture 回归结果。
-- [ ] 模型画像验证若缺 Key，明确列为未验证，不谎报完整闭环。
+- [x] 示例产品页面读取有真实证据。（静态读取：真实 URL curl 抓取 + 回归测试；渲染兜底与画像结果实测归 T29/T10）
+- [x] 当前小红书 DOM 提取有真实证据和 fixture 回归结果。（6 个真实脱敏 fixture；adapter 15 项 + session 16 项回归通过）
+- [x] 模型画像验证若缺 Key，明确列为未验证，不谎报完整闭环。（Key 已就绪但画像在 T10/G2 实现，本阶段未宣称闭环）
 
 ## 第四阶段：模型与判断规则
 
@@ -487,7 +487,13 @@ G3 检查：
 | 2026-10-15 | T05 | 完成 | src/privacy/redact.ts（手机/邮箱/身份证/标签微信QQ，幂等，保留年份/价格/题号）+ ai-payload.ts 白名单 DTO（无昵称/主页/用户ID/URL/token；c001/p001 映射；30000 与批次预算截断标记）；tests/unit/redact.test.ts 通过 | 正则覆盖度以正反例为准，不声称识别所有变体 |
 | 2026-10-15 | T06 | 完成 | credentials.ts（session 默认/local 记住，绝不 sync；setAccessLevel TRUSTED_CONTEXTS）；handlers.ts 发送者校验+按需 origin；background 验证 protocol 消息并拒 content script；Settings 最小页可保存/清除 Key 与授权域名；tests/unit/credentials.test.ts 通过 | 重启浏览器后 session Key 失效、真实权限弹窗归 T29 |
 | 2026-10-15 | T11 | 完成 | 内置浏览器已有登录态（profile 66bf5605…，证据 D:\Qoder\captures\xiaohongshu-login-state.txt，无二维码环节）；采集 6 个真实脱敏 fixture（弹层展开/折叠/无评论/弹层+背后信息流/纯信息流/404），浏览器内匿名化：hex ID→anonuserN/anonnoteN、comment-0001… 合成、剥 xsec 跟踪参数、script/图片/外链清除、文本正则脱敏；meta.json 登记来源、日期、预期条数与选择器依据；docs/evidence/README.md 说明方法与待补证据；暂存区扫描无 Key/token/hex ID | 虚拟列表滚动移除（X03）归 T14/T29；风控验证码遮挡页未主动触发，detectBlock 特征待真实时机补证 |
-| 2026-10-15 | 环境实测 | 已完成 | browser-use=Qoder Electron 不能加载扩展；未登录可见部分评论 DOM；Edge 有小红书登录态（D002） | T11 需用户扫码登录内置浏览器 |
+| 2026-10-15 | 环境实测 | 已完成 | browser-use=Qoder Electron 不能加载扩展；未登录可见部分评论 DOM；Edge 有小红书登录态（D002） | T11 需用户扫码登录内置浏览器（后经用户确认跳过二维码，已有登录态直接采集） |
+| 2026-10-15 | T07 | 完成 | url-policy.ts（私网/凭据/localhost/IPv6 回环拒绝、保留 hash）+ extract-static.ts（title-meta/json-ld/headings/article/price-offer 分块、2MB/30000 字符预算、needsRender 启发式）；tests/unit/product-static.test.ts 8 项通过，含真实示例产品页 curl 抓取 fixture 的标题与 needsRender 回归 | 真实浏览器内渲染读取归 T29 |
+| 2026-10-15 | T08 | 完成 | extract-rendered.ts 自包含注入函数（executeScript 序列化约束，ignoreVisibility 供 jsdom）；render-reader.ts 临时标签+正文稳定+origin 复核+自建标签清理+取消；handlers.ts 注册 PRODUCT_READ_RENDERED/CANCEL 敏感命令；background 注册接入 | 真实浏览器权限弹窗与后台标签行为归 T29 |
+| 2026-10-15 | T09 | 完成 | product/service.ts collectProductSources：权限门→fetch 限额→静态抽取→渲染兜底→同 origin ≤2 补读（标签正则、跳过导航/页脚、预算未满才补）；tests/integration/product-service.test.ts 5 项通过（mock wxt/browser） | 未对真实站点跑端到端补读，归 T29；合成 fixture 用途已在 docs/evidence/README.md 区分 |
+| 2026-10-15 | T12 | 完成 | xhs/adapter.ts：detectPage/parseNote/parseLoadedComments，限定评论容器、缺容器报 PARSE_FAILED 绝不整页兜底，父子 comment 对应、作者“作者”标签、赞/回复占位文本不产数字；tests/unit/xhs-adapter.test.ts 15 项通过（6 fixture + URL 桩：noteId 不取 xsec_token，feed 卡片零混入 28 条精确） | 风控验证码 DOM 特征未采集（不主动触发），遮挡检测待 T29 补证 |
+| 2026-10-15 | T13 | 完成 | domain/identity.ts（强/弱身份、保守组合哈希、无作者无时间按序号保守保留、commentKey 去重、contextHash 只含稳定上下文、publishedAt 不猜相对时间）+ analysis/cache.ts（8 成分缓存键、filterUncached）；tests/unit/identity-cache.test.ts 18 项通过；AI 临时 c001/p001 映射复用 ai-payload.ts idMap | 缓存失效的真实模型调用收益归 T20/T22 mock 闭环验证 |
+| 2026-10-15 | T14 | 完成 | xhs/session.ts XhsSessionManager：STATUS/START/SNAPSHOT/STOP 路由、启动后才挂 observer、500ms 防抖、先打码再暂存、500 上限 truncated、心跳 15s 检查/60s 无活动结束、SPA 换帖撤旧会话（PAGE_CHANGED）、登录弹窗出现即停（PAGE_BLOCKED）、UTF-8 预算分块 + 绑定 sessionId/version 的 cursor（换帖/缓冲变化→SNAPSHOT_EXPIRED）；entrypoints/xhs.content.ts 只处理 XHS_* 且校验 sender.id；protocol.ts 导出 payload 类型；tests/integration/xhs-session.test.ts 16 项通过（真实 fixture 28 条中 2 条纯图片无文本被跳过→26 条、>1MB 分块翻页取全 300 条） | X03 真实滚动移除、真实扩展环境消息链路归 T29 |
 
 ## 任务状态更新
 
@@ -497,6 +503,13 @@ G3 检查：
 - [x] T04 完成并记录
 - [x] T05 完成并记录
 - [x] T06 完成并记录
+- [x] T07 完成并记录
+- [x] T08 完成并记录
+- [x] T09 完成并记录
+- [x] T11 完成并记录
+- [x] T12 完成并记录
+- [x] T13 完成并记录
+- [x] T14 完成并记录
 
 G0 检查：
 - [x] 基础构建通过，schema/数据表/消息类型一致。（pnpm typecheck/lint/test(25)/build 全绿，manifest MV3）

@@ -15,6 +15,12 @@
 
 每个选择器的登记与预期数量见 `tests/fixtures/xhs/meta.json`。
 
+## 产品页真实证据（T07–T09）
+
+- tests/fixtures/products/real-app-shell-competition.html：2026-10-15 用 curl 从真实示例产品 URL（技术方案 B01 的竞赛题库站，https，公开页面）抓取的静态 HTML。内容为 hash-route SPA 外壳（717 字节，仅标题与加载占位），无个人信息、无 Cookie。回归测试断言 extractStatic 提取真实标题并判定需渲染兜底，见 tests/unit/product-static.test.ts。
+- tests/fixtures/products/static-info.html / app-shell.html：为单元覆盖构造的合成页（JSON-LD 价格、截断、空壳等分支），非真实页面抓取，已在测试中注明用途。
+- 真实产品页的渲染兜底读取（临时标签 + executeScript）与画像生成结果属浏览器环境行为，归 T29 实测取证。
+
 ## 原始未脱敏 DOM
 
 `docs/evidence/raw/` 下的 `.html` 为脱敏前的中间快照，已列入 .gitignore，仅本机保留，到期清理（见 T26 保留期）。真实未脱敏数据不进入仓库、不进入 AI DTO、不进入导出。

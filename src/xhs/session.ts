@@ -1,0 +1,304 @@
+import { AppError } from '../domain/errors';
+import { LIMITS } from '../domain/limits';
+import { commentIdentity, normalizeCommentText, parsePublishedAt } from '../domain/identity';
+import type { Comment, Note } from '../domain/schemas';
+import { redactText } from '../privacy/redact';
+import {
+  type Request,
+  type XhsStatusPayload,
+  type SnapshotPayload,
+} from '../messaging/protocol';
+import { detectPage, parseLoadedComments, parseNote, type ParsedComment } from './adapter';
+import { SEL, PARSER_VERSION } from './selectors';
+
+export type EndReason = 'stopped' | 'page_changed' | 'blocked' | 'heartbeat';
+
+const encoder = new TextEncoder();
+
+function isoNow(now: () => number): string {
+  return new Date(now()).toISOString();
+}
+
+/** 登录遮挡即使笔记容器仍在 DOM 也必须停止采集。 */
+function pageBlocked(doc: Document): boolean {
+  return detectPage(doc) === 'blocked' || !!doc.querySelector(SEL.loginOverlay);
+}
+
+/** 解码 cursor（不透明字符串）；任何不匹配都视为失效。 */
+function parseCursor(cursor: string): { sessionId: string; version: number; offset: number } | null {
+  const m = /^([0-9a-f-]{36})\.(\d+)\.(\d+)$/.exec(cursor);
+  if (!m) return null;
+  return { sessionId: m[1]!, version: Number(m[2]), offset: Number(m[3]) };
+}
+
+class ActiveSession {
+  readonly id = crypto.randomUUID();
+  noteKey: string;
+  note: Note;
+  buffer: Comment[] = [];
+  keySet = new Set<string>();
+  elementKey = new Map<string, string>();
+  elementOrdinal = new Map<string, number>();
+  version = 0;
+  limitReached = false;
+  lastActivityAt: number;
+
+  constructor(noteKey: string, note: Note, startedAt: number) {
+    this.noteKey = noteKey;
+    this.note = note;
+    this.lastActivityAt = startedAt;
+  }
+}
+
+export class XhsSessionManager {
+  private session: ActiveSession | null = null;
+  private lastEnd: EndReason | null = null;
+  private observer: MutationObserver | null = null;
+  private debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  private ordinal = 0;
+
+  constructor(
+    private getDoc: () => Document,
+    private now: () => number = () => Date.now(),
+  ) {}
+
+  async handle(req: Request): Promise<unknown> {
+    switch (req.type) {
+      case 'XHS_GET_STATUS': return this.status();
+      case 'XHS_START_SESSION': return this.start(req.payload.expectedNoteKey);
+      case 'XHS_GET_SNAPSHOT': return this.snapshot(req.payload.sessionId, req.payload.expectedNoteKey, req.payload.cursor);
+      case 'XHS_STOP_SESSION': return this.stop(req.payload.sessionId);
+      default: throw new AppError('UNKNOWN', '不支持的消息类型');
+    }
+  }
+
+  private status(): XhsStatusPayload {
+    const doc = this.getDoc();
+    const kind = detectPage(doc);
+    if (kind === 'blocked') {
+      return { noteKey: null, parserVersion: PARSER_VERSION, supported: false, blocked: true };
+    }
+    let noteKey: string | null = null;
+    try {
+      noteKey = parseNote(doc).noteKey;
+    } catch {
+      noteKey = null;
+    }
+    return { noteKey, parserVersion: PARSER_VERSION, supported: kind === 'note', blocked: false };
+  }
+
+  private start(expectedNoteKey: string): SnapshotPayload {
+    const doc = this.getDoc();
+    if (pageBlocked(doc)) throw new AppError('PAGE_BLOCKED', '页面被登录或风控遮挡，已停止采集');
+    const parsed = parseNote(doc);
+    if (parsed.noteKey !== expectedNoteKey) {
+      throw new AppError('PAGE_CHANGED', '当前笔记与请求笔记不一致，请重新获取状态');
+    }
+    if (this.session) this.endSession('stopped');
+    const note: Note = {
+      noteKey: parsed.noteKey,
+      sourceUrl: parsed.sourceUrl.slice(0, LIMITS.maxUrlChars),
+      title: redactText(parsed.title).slice(0, LIMITS.maxNoteChars),
+      bodyExcerpt: redactText(parsed.bodyExcerpt),
+      capturedAt: isoNow(this.now),
+      parserVersion: parsed.parserVersion,
+    };
+    this.session = new ActiveSession(parsed.noteKey, note, this.now());
+    this.lastEnd = null;
+    this.ingest();
+    this.attachObserver();
+    this.ensureHeartbeatTimer();
+    return this.buildChunk(0);
+  }
+
+  private assertLive(sessionId: string, expectedNoteKey: string): ActiveSession {
+    if (this.session && pageBlocked(this.getDoc())) {
+      this.endSession('blocked');
+    }
+    if (!this.session) {
+      const reason = this.lastEnd;
+      if (reason === 'page_changed') throw new AppError('PAGE_CHANGED', '笔记已切换，旧会话已失效');
+      if (reason === 'blocked') throw new AppError('PAGE_BLOCKED', '页面被遮挡，会话已停止');
+      throw new AppError('SNAPSHOT_EXPIRED', '采集会话不存在或已结束，请重新开始');
+    }
+    const session = this.session;
+    if (session.id !== sessionId) throw new AppError('SNAPSHOT_EXPIRED', '会话 ID 不匹配');
+    if (session.noteKey !== expectedNoteKey) throw new AppError('PAGE_CHANGED', '笔记已切换，本会话不再返回数据');
+    session.lastActivityAt = this.now();
+    return session;
+  }
+
+  private snapshot(sessionId: string, expectedNoteKey: string, cursor: string | null): SnapshotPayload {
+    const session = this.assertLive(sessionId, expectedNoteKey);
+    let offset = 0;
+    if (cursor) {
+      const parsed = parseCursor(cursor);
+      if (!parsed || parsed.sessionId !== session.id) {
+        throw new AppError('SNAPSHOT_EXPIRED', 'cursor 与当前会话不匹配');
+      }
+      if (parsed.version !== session.version) {
+        throw new AppError('SNAPSHOT_EXPIRED', '缓冲在分页期间发生变化，请从头重新获取');
+      }
+      if (parsed.offset < 0 || parsed.offset > session.buffer.length) {
+        throw new AppError('SNAPSHOT_EXPIRED', 'cursor 越界，请重新获取');
+      }
+      offset = parsed.offset;
+    }
+    return this.buildChunk(offset);
+  }
+
+  private stop(sessionId: string): { stopped: boolean } {
+    if (this.session && this.session.id === sessionId) this.endSession('stopped');
+    return { stopped: true };
+  }
+
+  /** 从 offset 起按 UTF-8 大小分块，整条消息不超过 maxMessageBytes。 */
+  private buildChunk(offset: number): SnapshotPayload {
+    const session = this.session!;
+    const budget = LIMITS.maxMessageBytes - 65_536;
+    const chunk: Comment[] = [];
+    let bytes = 0;
+    for (let i = offset; i < session.buffer.length; i++) {
+      const c = session.buffer[i]!;
+      const size = encoder.encode(JSON.stringify(c)).length;
+      if (chunk.length > 0 && bytes + size > budget) break;
+      chunk.push(c);
+      bytes += size;
+    }
+    const hasMore = offset + chunk.length < session.buffer.length;
+    return {
+      sessionId: session.id,
+      noteKey: session.noteKey,
+      parserVersion: PARSER_VERSION,
+      capturedAt: isoNow(this.now),
+      note: session.note,
+      comments: chunk,
+      hasMoreLoaded: hasMore,
+      truncated: session.limitReached,
+      nextCursor: hasMore ? `${session.id}.${session.version}.${offset + chunk.length}` : null,
+    };
+  }
+
+  /** 增量读取：先打码再暂存；500 条上限后停止增加。 */
+  private ingest(): void {
+    const session = this.session;
+    if (!session) return;
+    let parsedList: ParsedComment[];
+    try {
+      parsedList = parseLoadedComments(this.getDoc(), session.noteKey);
+    } catch {
+      return;
+    }
+    const capturedAt = isoNow(this.now);
+    for (const p of parsedList) {
+      if (session.buffer.length >= LIMITS.maxSessionComments) {
+        session.limitReached = true;
+        break;
+      }
+      const text = redactText(p.text);
+      const parentKey = p.isSub && p.parentElementId
+        ? session.elementKey.get(p.parentElementId) ?? null
+        : null;
+      if (p.elementId && !session.elementOrdinal.has(p.elementId)) {
+        session.elementOrdinal.set(p.elementId, this.ordinal++);
+      }
+      const ordinal = p.elementId ? session.elementOrdinal.get(p.elementId)! : this.ordinal++;
+      const identity = commentIdentity({
+        noteKey: session.noteKey,
+        platformCommentId: p.platformCommentId,
+        authorLocalKey: p.authorLocalKey,
+        text,
+        publishedText: p.publishedText,
+        parentKey,
+        ordinal,
+      });
+      if (p.elementId) session.elementKey.set(p.elementId, identity.commentKey);
+      if (session.keySet.has(identity.commentKey)) continue;
+      if (!normalizeCommentText(text)) continue;
+      session.keySet.add(identity.commentKey);
+      session.buffer.push({
+        commentKey: identity.commentKey,
+        noteKey: session.noteKey,
+        platformCommentId: p.platformCommentId,
+        parentKey,
+        text,
+        authorDisplayName: p.authorDisplayName ? redactText(normalizeCommentText(p.authorDisplayName)) : null,
+        authorLocalKey: p.authorLocalKey,
+        profileUrl: p.profileUrl,
+        publishedText: p.publishedText,
+        publishedAt: parsePublishedAt(p.publishedText),
+        likeCount: p.likeCount,
+        capturedAt,
+        identityQuality: identity.identityQuality,
+        truncated: p.truncated,
+      });
+      session.version += 1;
+    }
+  }
+
+  private attachObserver(): void {
+    this.observer?.disconnect();
+    const doc = this.getDoc();
+    this.observer = new MutationObserver(() => this.scheduleCheck());
+    this.observer.observe(doc.documentElement, { childList: true, subtree: true });
+  }
+
+  private scheduleCheck(): void {
+    if (this.debounceTimer) return;
+    this.debounceTimer = setTimeout(() => {
+      this.debounceTimer = null;
+      this.checkDom();
+    }, LIMITS.observerDebounceMs);
+  }
+
+  private checkDom(): void {
+    if (!this.session) return;
+    const doc = this.getDoc();
+    if (pageBlocked(doc)) {
+      this.endSession('blocked');
+      return;
+    }
+    let currentNoteKey: string | null = null;
+    try {
+      currentNoteKey = parseNote(doc).noteKey;
+    } catch {
+      currentNoteKey = null;
+    }
+    if (currentNoteKey && currentNoteKey !== this.session.noteKey) {
+      this.endSession('page_changed');
+      return;
+    }
+    if (!doc.querySelector(SEL.commentsArea)) return;
+    this.ingest();
+  }
+
+  private ensureHeartbeatTimer(): void {
+    if (this.heartbeatTimer) return;
+    this.heartbeatTimer = setInterval(() => {
+      if (this.session && this.now() - this.session.lastActivityAt > LIMITS.sessionHeartbeatTimeoutMs) {
+        this.endSession('heartbeat');
+      }
+    }, LIMITS.sessionHeartbeatIntervalMs);
+  }
+
+  private endSession(reason: EndReason): void {
+    this.observer?.disconnect();
+    this.observer = null;
+    if (this.debounceTimer) {
+      clearTimeout(this.debounceTimer);
+      this.debounceTimer = null;
+    }
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
+    this.session = null;
+    this.lastEnd = reason;
+  }
+
+  /** 供页面卸载或测试收尾。 */
+  dispose(): void {
+    this.endSession('stopped');
+  }
+}
