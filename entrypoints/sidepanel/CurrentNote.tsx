@@ -30,6 +30,10 @@ function ItemCard({ view, product, onToggleHandled }: {
   const url = safeExternalUrl(view.comment.profileUrl); // 不自动打开，也只给合法链接
   return (
     <div style={{ border: '1px solid #eee', borderRadius: 6, padding: 6, fontSize: 12 }}>
+      <div style={{ color: '#666' }}>
+        {view.comment.authorDisplayName ?? '（页面无昵称）'}
+        {view.comment.locationText ? ` · ${view.comment.locationText}` : ''}
+      </div>
       <div style={{ color: '#444' }}>{view.comment.text}</div>
       <div style={{ marginTop: 4 }}>
         <b>{view.analysis.decision.needSummary}</b>

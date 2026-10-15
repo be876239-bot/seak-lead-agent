@@ -79,6 +79,8 @@ export const CommentSchema = z.object({
   authorDisplayName: z.string().max(120).nullable(),
   authorLocalKey: z.string().max(256).nullable(),
   profileUrl: z.string().max(LIMITS.maxUrlChars).nullable(),
+  /** IP 属地等页面明示的位置文本（脱敏后仅本地保存与导出，绝不进 AI DTO） */
+  locationText: z.string().max(60).nullish(),
   publishedText: z.string().max(120).nullable(),
   publishedAt: UtcIso.nullable(),
   likeCount: z.number().int().min(0).nullable(),

@@ -164,6 +164,10 @@ export default function Leads() {
                   : (note?.title ?? '笔记快照已过期')}
               </span>
             </div>
+            <div style={{ color: '#666' }}>
+              {v.comment.authorDisplayName ?? '（页面无昵称）'}
+              {v.comment.locationText ? ` · ${v.comment.locationText}` : ''}
+            </div>
             <div>{v.comment.text}</div>
             <div><b>{v.analysis.decision.needSummary}</b>
               <span style={{ color: '#777', marginLeft: 6 }}>

@@ -226,6 +226,7 @@ export class XhsSessionManager {
         authorDisplayName: p.authorDisplayName ? redactText(normalizeCommentText(p.authorDisplayName)) : null,
         authorLocalKey: p.authorLocalKey,
         profileUrl: p.profileUrl,
+        locationText: p.locationText ? redactText(p.locationText).slice(0, 60) : null,
         publishedText: p.publishedText,
         publishedAt: parsePublishedAt(p.publishedText),
         likeCount: p.likeCount,

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { csvCell, csvRow, csvWithBom, toCsv } from '../../src/export/csv';
-import { EXPORT_SCHEMA_VERSION, buildLeadsExport } from '../../src/export/json';
+import { EXPORT_SCHEMA_VERSION, buildLeadsExport, leadsToCsvRows } from '../../src/export/json';
 
 describe('CSV 单元格防护', () => {
   it('中文/引号/换行安全加引号转义', () => {
@@ -34,7 +34,7 @@ describe('CSV 单元格防护', () => {
 });
 
 describe('JSON 导出文档', () => {
-  it('带 schemaVersion/profileVersion，过滤字段不含 Key/昵称/原始 DOM', () => {
+  it('带 schemaVersion/profileVersion；含脱敏昵称/用户ID/属地；不含 Key 与原始 DOM', () => {
     const product = {
       id: '1'.repeat(36), inputUrl: 'http://ex.com/p', finalUrl: 'https://ex.com/p',
       profileVersion: 2,
@@ -54,6 +54,7 @@ describe('JSON 导出文档', () => {
       group: 'high_intent', modelGroup: 'high_intent', source: 'model', correction: null, handled: false,
       comment: {
         commentKey: 'n:c1', noteKey: 'n', text: '多少钱？', authorDisplayName: '某昵称', authorLocalKey: 'k',
+        locationText: '北京',
         platformCommentId: null, parentKey: null, profileUrl: null, publishedText: null, publishedAt: null,
         likeCount: null, capturedAt: '2026-10-10T00:00:00Z', truncated: false, identityQuality: 'weak',
       },
@@ -78,9 +79,14 @@ describe('JSON 导出文档', () => {
     expect(doc.leads[0]!.analyzedWith.profileVersion).toBe(2);
     expect(doc.leads[0]!.noteUrl).toContain('xiaohongshu');
     const json = JSON.stringify(doc);
-    expect(json).not.toContain('某昵称');
-    expect(json).not.toContain('authorDisplayName');
+    expect(json).toContain('某昵称');
+    expect(json).toContain('北京');
+    expect(json).toContain('"authorUserId":"k"');
     expect(json).not.toContain('apiKey');
     expect(json).not.toContain('sourceBlocks');
+    const rows = leadsToCsvRows([view], { n: 'https://www.xiaohongshu.com/explore/abc' });
+    expect(rows[0]).toEqual(expect.arrayContaining(['网友昵称', '小红书用户ID', 'IP属地', '评论者主页']));
+    expect(rows[1]).toContain('某昵称');
+    expect(rows[1]).toContain('北京');
   });
 });
