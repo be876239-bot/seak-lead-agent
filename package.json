@@ -1,0 +1,47 @@
+{
+  "name": "seeklead-agent",
+  "description": "觅客Agent：从评论区找客户的本地浏览器插件",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "wxt",
+    "dev:edge": "wxt -b edge",
+    "build": "wxt build",
+    "build:edge": "wxt build -b edge",
+    "zip": "wxt zip",
+    "zip:edge": "wxt zip -b edge",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:integration": "vitest run --dir tests/integration",
+    "postinstall": "wxt prepare"
+  },
+  "pnpm": {
+    "overrides": {
+      "@vitejs/plugin-react": "5.2.0"
+    }
+  },
+  "dependencies": {
+    "@mozilla/readability": "^0.6.0",
+    "dexie": "^4.2.1",
+    "papaparse": "^5.5.4",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "zod": "^4.1.13"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.37.0",
+    "@types/papaparse": "^5.5.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@wxt-dev/module-react": "^1.1.5",
+    "eslint": "^9.37.0",
+    "fake-indexeddb": "^6.2.5",
+    "jsdom": "^27.0.0",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.46.0",
+    "vitest": "^3.2.4",
+    "wxt": "^0.21.3"
+  }
+}

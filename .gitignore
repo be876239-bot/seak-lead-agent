@@ -1,0 +1,10 @@
+.env
+.env.local
+node_modules/
+.output/
+.wxt/
+dist/
+*.zip
+docs/evidence/raw/
+test-results/
+coverage/

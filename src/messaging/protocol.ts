@@ -1,0 +1,101 @@
+import { z } from 'zod';
+import { ERROR_CODES, type ErrorCode } from '../domain/errors';
+import { CommentSchema, NoteSchema, ProductSourceBlockSchema } from '../domain/schemas';
+import { LIMITS } from '../domain/limits';
+
+export const PROTOCOL_VERSION = 1;
+
+export const MessageType = z.enum([
+  'XHS_GET_STATUS',
+  'XHS_START_SESSION',
+  'XHS_GET_SNAPSHOT',
+  'XHS_STOP_SESSION',
+  'PRODUCT_READ_RENDERED',
+  'PRODUCT_CANCEL_READ',
+]);
+export type MessageType = z.infer<typeof MessageType>;
+
+const RequestId = z.string().min(1).max(64);
+
+export const RequestSchema = z.discriminatedUnion('type', [
+  z.object({ protocol: z.literal(PROTOCOL_VERSION), requestId: RequestId, type: z.literal('XHS_GET_STATUS'), payload: z.object({}) }),
+  z.object({
+    protocol: z.literal(PROTOCOL_VERSION), requestId: RequestId, type: z.literal('XHS_START_SESSION'),
+    payload: z.object({ expectedNoteKey: z.string().min(1).max(256) }),
+  }),
+  z.object({
+    protocol: z.literal(PROTOCOL_VERSION), requestId: RequestId, type: z.literal('XHS_GET_SNAPSHOT'),
+    payload: z.object({ sessionId: z.string().min(1).max(64), expectedNoteKey: z.string().min(1).max(256), cursor: z.string().max(256).nullable() }),
+  }),
+  z.object({
+    protocol: z.literal(PROTOCOL_VERSION), requestId: RequestId, type: z.literal('XHS_STOP_SESSION'),
+    payload: z.object({ sessionId: z.string().min(1).max(64) }),
+  }),
+  z.object({
+    protocol: z.literal(PROTOCOL_VERSION), requestId: RequestId, type: z.literal('PRODUCT_READ_RENDERED'),
+    payload: z.object({ jobId: z.string().uuid(), url: z.string().url().max(LIMITS.maxUrlChars) }),
+  }),
+  z.object({
+    protocol: z.literal(PROTOCOL_VERSION), requestId: RequestId, type: z.literal('PRODUCT_CANCEL_READ'),
+    payload: z.object({ jobId: z.string().uuid() }),
+  }),
+]);
+export type Request = z.infer<typeof RequestSchema>;
+
+export const XhsStatusPayload = z.object({
+  noteKey: z.string().max(256).nullable(),
+  parserVersion: z.string().max(64),
+  supported: z.boolean(),
+  blocked: z.boolean(),
+});
+
+export const SnapshotPayload = z.object({
+  sessionId: z.string().max(64),
+  noteKey: z.string().max(256),
+  parserVersion: z.string().max(64),
+  capturedAt: z.iso.datetime(),
+  note: NoteSchema.nullable(),
+  comments: z.array(CommentSchema).max(LIMITS.maxSessionComments),
+  hasMoreLoaded: z.boolean(),
+  truncated: z.boolean(),
+  nextCursor: z.string().max(256).nullable(),
+});
+
+export const ProductReadRenderedPayload = z.object({
+  jobId: z.string().uuid(),
+  finalUrl: z.string().url().max(LIMITS.maxUrlChars).nullable(),
+  blocks: z.array(ProductSourceBlockSchema).max(LIMITS.maxProductPages),
+  truncated: z.boolean(),
+  pendingOrigin: z.string().max(LIMITS.maxUrlChars).nullable(),
+});
+
+export const ResponseErrorSchema = z.object({
+  code: z.enum(ERROR_CODES),
+  message: z.string().max(500),
+  retryable: z.boolean(),
+});
+export type ResponseError = z.infer<typeof ResponseErrorSchema> & { code: ErrorCode };
+
+export const ResponseSchema = z.object({
+  requestId: RequestId,
+  ok: z.boolean(),
+  data: z.unknown().optional(),
+  error: ResponseErrorSchema.optional(),
+});
+export type Response = z.infer<typeof ResponseSchema>;
+
+export function buildRequest<T extends MessageType>(
+  type: T,
+  payload: unknown,
+): Request {
+  const req = { protocol: PROTOCOL_VERSION, requestId: crypto.randomUUID(), type, payload };
+  return RequestSchema.parse(req);
+}
+
+export function buildOk(requestId: string, data?: unknown): Response {
+  return { requestId, ok: true, data };
+}
+
+export function buildError(requestId: string, error: ResponseError): Response {
+  return { requestId, ok: false, error };
+}

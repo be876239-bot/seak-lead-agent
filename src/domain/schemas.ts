@@ -1,0 +1,210 @@
+import { z } from 'zod';
+import { LIMITS } from './limits';
+
+export const UtcIso = z.iso.datetime();
+
+export const EvidenceSchema = z.object({
+  sourceId: z.string().min(1).max(64),
+  quote: z.string().min(1).max(LIMITS.maxEvidenceQuoteChars),
+});
+export type Evidence = z.infer<typeof EvidenceSchema>;
+
+export const ClaimStatus = z.enum(['observed', 'inferred', 'unknown', 'user_edited']);
+export const ClaimSchema = z.object({
+  value: z.string().max(LIMITS.maxClaimValueChars).nullable(),
+  status: ClaimStatus,
+  evidence: z.array(EvidenceSchema).max(LIMITS.maxClaimEvidence),
+}).refine((c) => (c.status === 'unknown' ? c.value === null : c.value !== null), {
+  message: 'unknown claim must have null value; others must have value',
+});
+export type Claim = z.infer<typeof ClaimSchema>;
+
+const ClaimList = (max: number) => z.array(ClaimSchema).max(max);
+
+export const ProductProfileSchema = z.strictObject({
+  schemaVersion: z.literal(1),
+  name: ClaimSchema,
+  category: ClaimSchema,
+  summary: ClaimSchema,
+  capabilities: ClaimList(LIMITS.maxProfileList),
+  targetAudience: ClaimList(LIMITS.maxProfileList),
+  needsServed: ClaimList(LIMITS.maxProfileList),
+  exclusions: ClaimList(LIMITS.maxProfileList),
+  accessMethod: ClaimSchema,
+  price: ClaimSchema,
+  purchaseChannel: ClaimSchema,
+  searchSuggestions: z.array(z.string().min(1).max(120)).max(LIMITS.maxProfileList),
+});
+export type ProductProfile = z.infer<typeof ProductProfileSchema>;
+
+export const ProductSourceBlockSchema = z.object({
+  id: z.string().min(1).max(32),
+  url: z.string().url().max(LIMITS.maxUrlChars),
+  text: z.string().max(LIMITS.maxProductChars),
+  fetchedAt: UtcIso,
+});
+export type ProductSourceBlock = z.infer<typeof ProductSourceBlockSchema>;
+
+export const ProductSchema = z.object({
+  id: z.string().uuid(),
+  inputUrl: z.string().url().max(LIMITS.maxUrlChars),
+  finalUrl: z.string().url().max(LIMITS.maxUrlChars),
+  profileVersion: z.number().int().min(1),
+  profile: ProductProfileSchema,
+  sourceBlocks: z.array(ProductSourceBlockSchema).max(LIMITS.maxProductPages),
+  modelId: z.string().min(1).max(120),
+  promptVersion: z.string().min(1).max(64),
+  createdAt: UtcIso,
+  updatedAt: UtcIso,
+});
+export type Product = z.infer<typeof ProductSchema>;
+
+export const NoteSchema = z.object({
+  noteKey: z.string().min(1).max(256),
+  sourceUrl: z.string().max(LIMITS.maxUrlChars),
+  title: z.string().max(LIMITS.maxNoteChars),
+  bodyExcerpt: z.string().max(LIMITS.maxNoteChars),
+  capturedAt: UtcIso,
+  parserVersion: z.string().min(1).max(64),
+});
+export type Note = z.infer<typeof NoteSchema>;
+
+export const IdentityQuality = z.enum(['strong', 'weak']);
+export const CommentSchema = z.object({
+  commentKey: z.string().min(1).max(512),
+  noteKey: z.string().min(1).max(256),
+  platformCommentId: z.string().max(128).nullable(),
+  parentKey: z.string().max(512).nullable(),
+  text: z.string().min(1).max(LIMITS.maxCommentChars),
+  authorDisplayName: z.string().max(120).nullable(),
+  authorLocalKey: z.string().max(256).nullable(),
+  profileUrl: z.string().max(LIMITS.maxUrlChars).nullable(),
+  publishedText: z.string().max(120).nullable(),
+  publishedAt: UtcIso.nullable(),
+  likeCount: z.number().int().min(0).nullable(),
+  capturedAt: UtcIso,
+  identityQuality: IdentityQuality,
+  truncated: z.boolean(),
+});
+export type Comment = z.infer<typeof CommentSchema>;
+
+export const DecisionSchema = z.strictObject({
+  commentId: z.string().min(1).max(32),
+  relevance: z.enum(['direct', 'adjacent', 'unrelated', 'unknown']),
+  need: z.enum(['explicit', 'implicit', 'none', 'unknown']),
+  purchaseIntent: z.enum(['explicit_buy', 'price_or_access', 'solution_seeking', 'free_only', 'none', 'unknown']),
+  speakerRole: z.enum(['seeker', 'seller', 'sharer', 'unknown']),
+  intentTarget: z.enum(['our_product', 'category', 'competitor', 'unknown']),
+  productFit: z.enum(['supported', 'unsupported', 'unknown']),
+  needSummary: z.string().min(1).max(300),
+  evidence: z.array(EvidenceSchema).max(LIMITS.maxDecisionEvidence),
+  reason: z.string().min(1).max(500),
+  uncertainty: z.string().max(500).nullable(),
+});
+export type Decision = z.infer<typeof DecisionSchema>;
+
+export const Group = z.enum(['high_intent', 'need', 'review', 'excluded']);
+export type Group = z.infer<typeof Group>;
+
+export const AnalysisSchema = z.object({
+  id: z.string().uuid(),
+  cacheKey: z.string().min(16).max(128),
+  productId: z.string().uuid(),
+  profileVersion: z.number().int().min(1),
+  commentKey: z.string().min(1).max(512),
+  contextHash: z.string().min(8).max(128),
+  decision: DecisionSchema,
+  group: Group,
+  modelId: z.string().min(1).max(120),
+  promptVersion: z.string().min(1).max(64),
+  ruleVersion: z.string().min(1).max(64),
+  createdAt: UtcIso,
+});
+export type Analysis = z.infer<typeof AnalysisSchema>;
+
+export const FeedbackSchema = z.object({
+  id: z.string().uuid(),
+  productId: z.string().uuid(),
+  commentKey: z.string().min(1).max(512),
+  analysisId: z.string().uuid(),
+  correctedGroup: Group.nullable(),
+  note: z.string().max(500).nullable(),
+  createdAt: UtcIso,
+});
+export type Feedback = z.infer<typeof FeedbackSchema>;
+
+export const LeadStateSchema = z.object({
+  id: z.string().min(1).max(600),
+  productId: z.string().uuid(),
+  commentKey: z.string().min(1).max(512),
+  handled: z.boolean(),
+  updatedAt: UtcIso,
+});
+export type LeadState = z.infer<typeof LeadStateSchema>;
+
+export const JobKind = z.enum(['product', 'comments']);
+export const JobStatus = z.enum([
+  'created', 'collecting', 'analyzing', 'completed', 'partial', 'failed', 'cancelled', 'interrupted',
+]);
+export const JobSchema = z.object({
+  id: z.string().uuid(),
+  kind: JobKind,
+  status: JobStatus,
+  ownerId: z.string().min(1).max(64),
+  generation: z.number().int().min(0),
+  productId: z.string().uuid().nullable(),
+  profileVersion: z.number().int().min(1).nullable(),
+  tabId: z.number().int().nullable(),
+  noteKey: z.string().max(256).nullable(),
+  provider: z.string().min(1).max(64),
+  modelId: z.string().min(1).max(120),
+  promptVersion: z.string().min(1).max(64),
+  totalItems: z.number().int().min(0),
+  completedItems: z.number().int().min(0),
+  failedItems: z.number().int().min(0),
+  createdAt: UtcIso,
+  updatedAt: UtcIso,
+  errorCode: z.string().max(64).nullable(),
+});
+export type Job = z.infer<typeof JobSchema>;
+
+export const BatchStatus = z.enum(['pending', 'running', 'completed', 'failed', 'cancelled', 'interrupted']);
+export const BatchSchema = z.object({
+  id: z.string().uuid(),
+  jobId: z.string().uuid(),
+  index: z.number().int().min(0),
+  status: BatchStatus,
+  cacheKeys: z.array(z.string().max(128)).max(LIMITS.maxBatchItems),
+  commentKeys: z.array(z.string().max(512)).max(LIMITS.maxBatchItems),
+  attemptCount: z.number().int().min(0),
+  inputHash: z.string().min(8).max(128),
+  startedAt: UtcIso.nullable(),
+  completedAt: UtcIso.nullable(),
+  errorCode: z.string().max(64).nullable(),
+});
+export type Batch = z.infer<typeof BatchSchema>;
+
+export const UsageSchema = z.object({
+  id: z.string().uuid(),
+  jobId: z.string().uuid(),
+  batchId: z.string().uuid().nullable(),
+  attemptIndex: z.number().int().min(0),
+  status: z.enum(['success', 'failed', 'unknown']),
+  modelId: z.string().min(1).max(120),
+  inputTokens: z.number().int().min(0).nullable(),
+  outputTokens: z.number().int().min(0).nullable(),
+  estimatedCny: z.number().min(0).nullable(),
+  priceVerifiedAt: UtcIso.nullable(),
+  durationMs: z.number().int().min(0),
+  createdAt: UtcIso,
+});
+export type Usage = z.infer<typeof UsageSchema>;
+
+export const LockSchema = z.object({
+  name: z.string().min(1).max(64),
+  ownerId: z.string().min(1).max(64),
+  generation: z.number().int().min(0),
+  jobId: z.string().uuid(),
+  leaseExpiresAt: UtcIso,
+});
+export type Lock = z.infer<typeof LockSchema>;

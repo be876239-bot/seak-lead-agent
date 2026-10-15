@@ -474,11 +474,32 @@ G3 检查：
 
 ## 统一完成记录
 
-接手者在这里持续追加，不删除历史失败原因。当前尚无开发记录。
+接手者在这里持续追加，不删除历史失败原因。
 
 | 日期 | 任务 | 状态 | 改动/验证摘要 | 未验证或阻塞 |
 |---|---|---|---|---|
 | 2026-10-15 | 文档交付 | 已完成 | DEVELOPMENT.md 和 TODO.md 已创建 | 插件代码、真实 API 和浏览器验收尚未开始 |
+| 2026-10-15 | 第0步 | 已完成 | .env 写入 Key（gitignore 排除）；curl 实测 qwen3.8-flash 连通（decisions.md D001） | 无 |
+| 2026-10-15 | T01 | 完成 | gh api 核对 8 个候选 LICENSE 与 HEAD commit，登记 THIRD_PARTY_NOTICES.md；无许可证两仓库仅思路参考 | 无 |
+| 2026-10-15 | T02 | 完成 | wxt 0.21.4 官方 react 模板脚手架合并；typecheck/lint/test/build/zip 全过；manifest MV3，权限 storage/sidePanel/scripting/activeTab+host_permissions；Node v24.13.0/pnpm 10.33.0 已写入 README；override 固定 @vitejs/plugin-react 5.2.0（vite7/8 兼容决策见 decisions.md 待补） | 真实浏览器加载验证归 T29 |
+| 2026-10-15 | T03 | 完成 | src/domain/schemas.ts、limits.ts、errors.ts、messaging/protocol.ts；tests/unit/schemas.test.ts 8 项通过（非法枚举/缺字段/超长/未知消息/unknown=null；模型输出 schema 用 strictObject 拒未知键） | 无 |
+| 2026-10-15 | T04 | 完成 | src/storage/db.ts 10 表+索引+DB_SCHEMA_VERSION=1；repositories.ts 含原子 commitBatch、cacheKey 唯一、画像版本递增、锁 lease/generation、markInterruptedOnRecovery；tests/integration/repositories.test.ts 5 项通过（fake-indexeddb 独立内存库，不污染正式库） | 真实浏览器 IndexedDB 持久性归 T29 |
+| 2026-10-15 | T05 | 完成 | src/privacy/redact.ts（手机/邮箱/身份证/标签微信QQ，幂等，保留年份/价格/题号）+ ai-payload.ts 白名单 DTO（无昵称/主页/用户ID/URL/token；c001/p001 映射；30000 与批次预算截断标记）；tests/unit/redact.test.ts 通过 | 正则覆盖度以正反例为准，不声称识别所有变体 |
+| 2026-10-15 | T06 | 完成 | credentials.ts（session 默认/local 记住，绝不 sync；setAccessLevel TRUSTED_CONTEXTS）；handlers.ts 发送者校验+按需 origin；background 验证 protocol 消息并拒 content script；Settings 最小页可保存/清除 Key 与授权域名；tests/unit/credentials.test.ts 通过 | 重启浏览器后 session Key 失效、真实权限弹窗归 T29 |
+| 2026-10-15 | 环境实测 | 已完成 | browser-use=Qoder Electron 不能加载扩展；未登录可见部分评论 DOM；Edge 有小红书登录态（D002） | T11 需用户扫码登录内置浏览器 |
+
+## 任务状态更新
+
+- [x] T01 完成并记录
+- [x] T02 完成并记录
+- [x] T03 完成并记录
+- [x] T04 完成并记录
+- [x] T05 完成并记录
+- [x] T06 完成并记录
+
+G0 检查：
+- [x] 基础构建通过，schema/数据表/消息类型一致。（pnpm typecheck/lint/test(25)/build 全绿，manifest MV3）
+- [x] 未引入后台服务器、商业化或自动浏览功能。
 
 ## 交给下一位 AI 的起始消息
 
