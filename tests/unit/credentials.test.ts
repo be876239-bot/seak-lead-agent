@@ -10,7 +10,14 @@ const store = vi.hoisted(() => {
       async remove(key: string) { delete data[key]; },
     };
   };
-  return { session: make(), local: make(), sync: make() };
+  // 真实 Chrome 的 setAccessLevel 只接受 { accessLevel } 对象；传字符串会抛错（曾有 bug 因此 Key 存不进去）。
+  const setAccessLevel = vi.fn(async (arg: unknown) => {
+    if (!arg || typeof arg !== 'object' || !('accessLevel' in arg)) {
+      throw new TypeError('Invalid arguments to setAccessLevel');
+    }
+  });
+  const session = { ...make(), setAccessLevel };
+  return { session, local: make(), sync: make() };
 });
 
 vi.mock('wxt/browser', () => ({

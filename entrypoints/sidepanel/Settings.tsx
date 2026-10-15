@@ -146,17 +146,25 @@ export default function Settings() {
           <button
             onClick={async () => {
               if (!apiKey.trim()) { setStatus('请先输入 Key'); return; }
-              await saveCredential({ presetId, apiKey: apiKey.trim(), model: model.trim(), remember });
-              setStatus(`已保存（${remember ? 'storage.local' : 'storage.session'}）`);
+              try {
+                await saveCredential({ presetId, apiKey: apiKey.trim(), model: model.trim(), remember });
+                setStatus(`已保存（${remember ? 'storage.local' : 'storage.session'}）`);
+              } catch (err) {
+                setStatus(`保存失败：${err instanceof Error ? err.message.slice(0, 200) : '未知错误'}`);
+              }
             }}
           >
             保存
           </button>
           <button
             onClick={async () => {
-              await clearCredential();
-              setApiKey('');
-              setStatus('已清除 Key（仅影响 Key，不触碰业务数据）');
+              try {
+                await clearCredential();
+                setApiKey('');
+                setStatus('已清除 Key（仅影响 Key，不触碰业务数据）');
+              } catch (err) {
+                setStatus(`清除失败：${err instanceof Error ? err.message.slice(0, 200) : '未知错误'}`);
+              }
             }}
           >
             清除 Key

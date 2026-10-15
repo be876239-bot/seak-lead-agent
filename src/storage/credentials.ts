@@ -20,32 +20,37 @@ export type Credential = {
 
 const KEY = 'crd' as const;
 
-async function ensureSessionAccessLevel() {
-  const storage = browser.storage.session as unknown as {
-    setAccessLevel?: (level: string) => Promise<void>;
-  };
-  await storage.setAccessLevel?.('TRUSTED_CONTEXTS');
+// storage.session 默认即 TRUSTED_CONTEXTS（仅扩展自身可读），无需也不应调用 setAccessLevel：
+// Chrome 要求参数为 { accessLevel } 对象，传字符串会直接抛错导致保存失败。
+function sessionArea() {
+  return browser.storage.session as
+    { get: (k: string) => Promise<Record<string, unknown>>; set: (o: Record<string, unknown>) => Promise<void>; remove: (k: string) => Promise<void> } | undefined;
 }
 
 export async function saveCredential(cred: Credential): Promise<void> {
-  await ensureSessionAccessLevel();
   if (cred.remember) {
     await browser.storage.local.set({ [KEY]: cred });
-    await browser.storage.session.remove(KEY);
+    await sessionArea()?.remove(KEY);
   } else {
-    await browser.storage.session.set({ [KEY]: cred });
+    const session = sessionArea();
+    if (!session) throw new Error('此浏览器不支持会话存储：请勾选“记住 Key”或改用 Chrome/Edge 最新版本');
+    await session.set({ [KEY]: cred });
     await browser.storage.local.remove(KEY);
   }
 }
 
 export async function loadCredential(): Promise<Credential | null> {
-  const inSession = await browser.storage.session.get(KEY);
-  if (inSession[KEY]) return inSession[KEY] as Credential;
+  try {
+    const inSession = await sessionArea()?.get(KEY);
+    if (inSession?.[KEY]) return inSession[KEY] as Credential;
+  } catch {
+    // 会话区不可用时仍回落到本地存储
+  }
   const inLocal = await browser.storage.local.get(KEY);
   return (inLocal[KEY] as Credential) ?? null;
 }
 
 export async function clearCredential(): Promise<void> {
-  await browser.storage.session.remove(KEY);
+  try { await sessionArea()?.remove(KEY); } catch { /* 忽略 */ }
   await browser.storage.local.remove(KEY);
 }
