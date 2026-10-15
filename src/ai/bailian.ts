@@ -17,6 +17,16 @@ type ChatCompletionBody = {
   error?: { message?: string };
 };
 
+/** 从错误响应体提取可读详情：优先 JSON 的 error.message，否则取纯文本前段；仅用于日志与报错，不含请求头。 */
+function errorDetail(raw: string): string {
+  try {
+    const j = JSON.parse(raw) as { error?: { message?: string }; message?: string };
+    const m = j.error?.message ?? j.message;
+    if (m) return String(m).replace(/\s+/g, ' ').slice(0, 160);
+  } catch { /* 非 JSON 错误体 */ }
+  return raw.replace(/\s+/g, ' ').trim().slice(0, 160);
+}
+
 export class BailianProvider implements AIProvider {
   constructor(private cfg: BailianConfig) {}
 
@@ -54,11 +64,15 @@ export class BailianProvider implements AIProvider {
       signal.removeEventListener('abort', onExternal);
     }
 
-    if (res.status === 401 || res.status === 403) throw new AppError('AI_AUTH', '模型鉴权失败，请检查 API Key 与模型权限');
-    if (res.status === 429) throw new AppError('AI_RATE_LIMIT', '模型限流，请稍后重试', true);
-    if (res.status === 413) throw new AppError('AI_PAYLOAD_TOO_LARGE', '请求体超出模型限制，请缩小批次后重试', true);
-    if (res.status >= 500) throw new AppError('AI_TIMEOUT', '模型服务异常（5xx），可重试', true);
-    if (!res.ok) throw new AppError('UNKNOWN', `模型请求失败（HTTP ${res.status}）`);
+    if (!res.ok) {
+      const detail = errorDetail(await res.text().catch(() => ''));
+      const tail = detail ? `：${detail}` : '';
+      if (res.status === 401 || res.status === 403) throw new AppError('AI_AUTH', `模型鉴权失败，请检查 API Key 与模型权限（HTTP ${res.status}${tail}）`);
+      if (res.status === 429) throw new AppError('AI_RATE_LIMIT', `模型限流，请稍后重试（HTTP 429${tail}）`, true);
+      if (res.status === 413) throw new AppError('AI_PAYLOAD_TOO_LARGE', `请求体超出模型限制，请缩小批次后重试（HTTP 413${tail}）`, true);
+      if (res.status >= 500) throw new AppError('AI_TIMEOUT', `模型服务异常（HTTP ${res.status}${tail}），可重试`, true);
+      throw new AppError('UNKNOWN', `模型请求失败（HTTP ${res.status}${tail}）`);
+    }
 
     let body: ChatCompletionBody;
     try {

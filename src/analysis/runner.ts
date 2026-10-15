@@ -51,6 +51,11 @@ function abortedCode(handle: LockHandle): Code {
   return reason?.code === 'CANCELLED' ? 'CANCELLED' : 'LOCK_HELD';
 }
 
+/** 外显错误摘要：校验类报错正文含引文（评论原文），只保留"："前的说明段；其余 message 均为自撰文案可完整外显。 */
+function safeErrSummary(e: AppError): string {
+  return (e.code === 'AI_INVALID_OUTPUT' ? (e.message.split('：')[0] ?? e.code) : e.message).slice(0, 140);
+}
+
 const claimText = (p: ProductProfile): string =>
   [p.name, p.category, p.summary, p.accessMethod, p.price, p.purchaseChannel]
     .map((c) => c.value ?? '')
@@ -137,7 +142,7 @@ async function classifyWithRepair(
       if (e.retryable && !retryableRetried && !handle.signal.aborted) {
         retryableRetried = true;
         attemptIndex += 1;
-        log?.(`模型调用失败（${e.code}：${e.message.slice(0, 80)}），${Math.round(delay / 1000)} 秒后自动重试 1 次…`);
+        log?.(`模型调用失败（${e.code}：${safeErrSummary(e)}），${Math.round(delay / 1000)} 秒后自动重试 1 次…`);
         if (delay > 0) await new Promise((r) => setTimeout(r, delay));
         continue;
       }
@@ -155,7 +160,7 @@ async function classifyWithRepair(
         inputTokens: null, outputTokens: null, durationMs: Date.now() - t0,
       }));
       if (e.code !== 'AI_INVALID_OUTPUT' || repair) throw e;
-      log?.('批次输出校验未通过，发起修复重发（最多 1 次）…');
+      log?.(`批次输出校验未通过（${safeErrSummary(e)}），发起修复重发（最多 1 次）…`);
       repair = { errorSummary: e.message, badOutput: safeJson(resp.value) };
     }
   }
@@ -273,9 +278,7 @@ async function executeRows(
       outcome.failedItems += comments.length;
       outcome.firstError ??= e.code;
       await deps.repos.updateBatch(row.id, { status: 'failed', errorCode: e.code });
-      // AI_INVALID_OUTPUT 的报错正文含引文（可能是评论文本），日志只记错误码
-      log?.(`批次 ${row.index + 1}/${total} 失败：${e.code}`
-        + `${e.code === 'AI_INVALID_OUTPUT' ? '' : `（${e.message.slice(0, 80)}）`}`);
+      log?.(`批次 ${row.index + 1}/${total} 失败：${e.code}（${safeErrSummary(e)}）`);
       if (e.code === 'AI_AUTH') {
         await stopRemaining('interrupted');
         break;
@@ -463,7 +466,7 @@ export async function runProfileGeneration(
         if (e.code === 'CANCELLED' || !(e.retryable && !retryableRetried)) throw e;
         retryableRetried = true;
         attemptIndex += 1;
-        spec.log?.(`模型调用失败（${e.code}：${e.message.slice(0, 80)}），${Math.round(retryDelay / 1000)} 秒后自动重试 1 次…`);
+        spec.log?.(`模型调用失败（${e.code}：${safeErrSummary(e)}），${Math.round(retryDelay / 1000)} 秒后自动重试 1 次…`);
         if (retryDelay > 0) await new Promise((r) => setTimeout(r, retryDelay));
         continue;
       }
@@ -481,7 +484,7 @@ export async function runProfileGeneration(
           inputTokens: null, outputTokens: null, durationMs: Date.now() - t0,
         }));
         if (e.code !== 'AI_INVALID_OUTPUT' || repair) throw e;
-        spec.log?.('画像输出校验未通过，发起修复重发（最多 1 次）…');
+        spec.log?.(`画像输出校验未通过（${safeErrSummary(e)}），发起修复重发（最多 1 次）…`);
         repair = { errorSummary: e.message, badOutput: safeJson(resp.value) };
       }
     }
