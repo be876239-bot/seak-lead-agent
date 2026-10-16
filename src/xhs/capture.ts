@@ -97,6 +97,7 @@ export async function captureNote(tabId: number, options: CaptureOptions = {}): 
   let endOfList = false;
   let addedCount = 0;
   let loadingReplies=false;
+  let activityVersion=0,atBottom=true,loadingComments=false;
   const report = async (loading: boolean, stopReason: CaptureProgress['stopReason'] = null) => {
     const replyCount=[...found.values()].filter(c=>c.parentKey!==null).length;
     await options.onProgress?.({ discoveredCount: found.size, addedCount, loading, stopReason,replyCount,topLevelCount:found.size-replyCount,loadingReplies:loading&&loadingReplies });
@@ -107,6 +108,9 @@ export async function captureNote(tabId: number, options: CaptureOptions = {}): 
       throw new AppError('PAGE_CHANGED', '快照所属笔记或会话改变，已停止采集');
     }
     loadingReplies=page.loadingReplies===true;
+    activityVersion=page.activityVersion??activityVersion;
+    atBottom=page.atBottom??true;
+    loadingComments=page.loadingComments===true;
     note ??= page.note;
     if (!note) throw new AppError('PARSE_FAILED', '未能解析笔记内容');
     const delta = page.comments.filter((c) => !found.has(c.commentKey)).slice(0,LIMITS.maxSessionComments-found.size);
@@ -152,6 +156,7 @@ export async function captureNote(tabId: number, options: CaptureOptions = {}): 
     let stopReason: CaptureProgress['stopReason'] = null;
     const startedAt = Date.now();
     let idleRounds = 0;
+    let quietMs=0;
     if (options.autoLoad) {
       for (let round = 0; round < LIMITS.captureMaxRounds; round++) {
         checkCancelled(signal);
@@ -159,20 +164,23 @@ export async function captureNote(tabId: number, options: CaptureOptions = {}): 
         if (endOfList) { stopReason = 'no_more'; break; }
         if (Date.now() - startedAt >= LIMITS.captureMaxDurationMs) { stopReason = 'time_limit'; break; }
         const before = found.size;
+        const activityBefore=activityVersion;
         addedCount = 0;
         await report(true);
         await drain(await snapshot(null, true));
         for (let sample = 0; sample < LIMITS.captureSamplesPerRound && !truncated && !endOfList; sample++) {
           await (options.wait ?? waitForLoad)(LIMITS.capturePollMs, signal);
           checkCancelled(signal);
+          const countBefore=found.size,versionBefore=activityVersion;
           await drain(await snapshot(null));
+          quietMs=found.size===countBefore&&activityVersion===versionBefore&&atBottom&&!loadingComments&&!loadingReplies?quietMs+LIMITS.capturePollMs:0;
           await report(true);
         }
-        if(loadingReplies) idleRounds=0;
+        if(loadingReplies||loadingComments||activityVersion!==activityBefore) idleRounds=0;
         else if (found.size === before) idleRounds += 1; else idleRounds = 0;
         if (truncated) { stopReason = 'limit'; break; }
         if (endOfList) { stopReason = 'no_more'; break; }
-        if (idleRounds >= LIMITS.captureIdleRounds) { stopReason = 'no_new'; break; }
+        if (idleRounds >= LIMITS.captureIdleRounds && atBottom && quietMs>=LIMITS.captureQuietMs) { stopReason = 'no_new'; break; }
         if (round === LIMITS.captureMaxRounds - 1) stopReason = 'round_limit';
       }
     }

@@ -34,7 +34,8 @@ beforeEach(async () => {
   const container = document.querySelector<HTMLElement>('.note-scroller')!;
   Object.defineProperties(container, { clientHeight: { value: 500, configurable: true }, scrollHeight: { value: 5000, configurable: true } });
   scroll = vi.fn();
-  container.scrollBy = scroll;
+  // JSDOM没有布局/原生滚动：保留scroll spy行为，另模拟浏览器真实scrollTop推进与夹紧。
+  container.scrollBy = (options) => { scroll(options); const top=typeof options==='object'?options.top??0:0;container.scrollTop=Math.min(Math.max(0,container.scrollHeight-container.clientHeight),container.scrollTop+top); };
   manager = new XhsSessionManager(() => document);
   db = new SeekLeadDb(`incremental-${crypto.randomUUID()}`);
   repos = new Repositories(db);

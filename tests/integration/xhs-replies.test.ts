@@ -22,7 +22,7 @@ const wait=async()=>{clock+=500;await Promise.resolve();};
 const persist=(note:Note,comments:Comment[])=>repos.saveCaptureDelta(jobId,note,comments,new AbortController().signal);
 beforeEach(async()=>{
  clock=0;document.body.innerHTML=readFileSync('tests/fixtures/xhs/nested-replies.html','utf8');
- const el=document.querySelector<HTMLElement>('.note-scroller')!;Object.defineProperties(el,{clientHeight:{value:500},scrollHeight:{value:5000}});el.scrollBy=vi.fn();
+ const el=document.querySelector<HTMLElement>('.note-scroller')!;Object.defineProperties(el,{clientHeight:{value:500},scrollHeight:{value:5000}});el.scrollBy=vi.fn(o=>{el.scrollTop=Math.min(el.scrollHeight-el.clientHeight,el.scrollTop+(o.top??0));});
  manager=new XhsSessionManager(()=>document,()=>clock);db=new SeekLeadDb('replies-'+crypto.randomUUID());repos=new Repositories(db);jobId=crypto.randomUUID();
  await repos.createJob({id:jobId,kind:'comments',status:'collecting',ownerId:'test',generation:0,productId:null,profileVersion:null,tabId:7,noteKey:null,provider:'mock',modelId:'mock',promptVersion:'same',totalItems:0,completedItems:0,failedItems:0,errorCode:null,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()});
  send.mockReset();send.mockImplementation(async(_id,raw)=>{const req=RequestSchema.parse(raw);try{return buildOk(req.requestId,await manager.handle(req));}catch(e){return buildError(req.requestId,toErrorPayload(e));}});

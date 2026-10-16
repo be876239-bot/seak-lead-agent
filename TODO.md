@@ -1,5 +1,7 @@
 # 觅客Agent MVP 开发 TODO
 
+2026-10-17 最新（D013）：少量评论漏采修复，24项新增回归，31文件336项全量通过，typecheck/lint/build/Edge ZIP与diff检查通过。短暂节点/列表替换、弱身份误合并、半屏滚动、15秒安静收尾、包装回复和媒体占位详见 `docs/comment-recall-2026-10-17.md`。真实Edge绑定Debugger unattached，用户选择先交付；E浏览器/F真实小红书NOT VERIFIED，不更新T29/T30完成状态。
+
 2026-10-16 最新（D012）：当前搜索标签真实DOM链接点击→等待→评论及回复采集/原AI→正常Back→重新定位下一篇；持久化导航状态、原搜索地址和已完成笔记，异常暂停。30文件/310项测试、typecheck/lint/build/Edge ZIP及合成浏览器两帖82条闭环通过。用户暂无法连接Edge，真实小红书切帖/评论/回复与Lead质量NOT VERIFIED，T29/T30仍未完成。交付与操作步骤见 `docs/normal-navigation-2026-10-16.md`。
 
 2026-10-16 最新（D011）：已实现主动采集中的安全回复展开、延迟/虚拟列表增量累计、parentKey关联修复、一级/回复计数与Lead父评论展示；总500条，不增加DB迁移或AI Prompt/分组变化。测试、包哈希及限制见 `docs/replies-capture-2026-10-16.md`。用户选择先交付，真实小红书未验收，T29/T30保持未完成。

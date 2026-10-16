@@ -10,7 +10,7 @@ import {
   type XhsStatusPayload,
   type SnapshotPayload,
 } from '../messaging/protocol';
-import { detectPage, parseLoadedComments, parseNote, replyExpandControls, type ParsedComment } from './adapter';
+import { detectPage, parseLoadedComments, parseCommentSubtree, parseNote, replyExpandControls, type ParsedComment } from './adapter';
 import { SEL, PARSER_VERSION } from './selectors';
 
 export type EndReason = 'stopped' | 'page_changed' | 'blocked' | 'heartbeat';
@@ -43,6 +43,9 @@ class ActiveSession {
   elementOrdinal = new Map<string, number>();
   weakElements = new WeakMap<Element, { signature: string; ordinal: number }>();
   sourceKeys = new WeakMap<Element,string>();
+  weakOwners = new Map<string,Element>();
+  activityVersion = 0;
+  activityText = '';
   replyLoad: {parentKey:string;before:number;startedAt:number;lastCount:number;changedAt:number} | null = null;
   replyActions = 0;
   replyRequests = new Set<string>();
@@ -64,6 +67,8 @@ export class XhsSessionManager {
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private ordinal = 0;
+  private knownLists = new WeakSet<Element>();
+  private knownAreas = new WeakSet<Element>();
 
   constructor(
     private getDoc: () => Document,
@@ -116,6 +121,11 @@ export class XhsSessionManager {
       parserVersion: parsed.parserVersion,
     };
     this.session = new ActiveSession(parsed.noteKey, note, this.now());
+    this.ordinal=0;
+    this.knownLists=new WeakSet();
+    this.knownAreas=new WeakSet();
+    const list=doc.querySelector(SEL.listContainer);if(list)this.knownLists.add(list);
+    const area=doc.querySelector(SEL.commentsArea);if(area)this.knownAreas.add(area);
     this.lastEnd = null;
     this.ingest();
     this.attachObserver();
@@ -201,8 +211,8 @@ export class XhsSessionManager {
     return false;
   }
 
-  /** 只滚动已确认评论列表在当前笔记内的可滚动祖先，不点击按钮、不访问接口。 */
-  private scrollComments(): void {
+  /** 状态判断与实际滚动必须选择同一祖先；不足一屏的内层不能冒充外层已到底。 */
+  private scrollContainer():HTMLElement|null {
     const doc = this.getDoc();
     const root = doc.querySelector(SEL.noteRoot);
     let el = doc.querySelector<HTMLElement>(SEL.listContainer);
@@ -212,17 +222,18 @@ export class XhsSessionManager {
       if (/(auto|scroll)/.test(style?.overflowY || style?.overflow || '') && el.clientHeight > 0) {
         shortList ??= el;
         if (el.scrollHeight > el.clientHeight) {
-          el.scrollBy({ top: Math.max(120, Math.min(800, el.clientHeight * 0.75)), behavior: 'instant' });
-          return;
+          return el;
         }
       }
       el = el.parentElement;
     }
-    if (shortList) {
-      shortList.scrollBy({ top: 120, behavior: 'instant' });
-      return; // 内容暂不足一屏仍等待多轮，不把它当解析错误或全量终点。
-    }
-    throw new AppError('PARSE_FAILED', '无法确认当前笔记的评论滚动容器；已停止，已保存评论保留');
+    return shortList;
+  }
+  /** 只滚动已确认评论列表在当前笔记内的可滚动祖先，不访问接口。 */
+  private scrollComments(): void {
+    const el=this.scrollContainer();
+    if(!el)throw new AppError('PARSE_FAILED', '无法确认当前笔记的评论滚动容器；已停止，已保存评论保留');
+    el.scrollBy({top:Math.max(1,Math.min(400,el.clientHeight*0.5)),behavior:'instant'});
   }
 
   private stop(sessionId: string): { stopped: boolean } {
@@ -244,6 +255,8 @@ export class XhsSessionManager {
       bytes += size;
     }
     const hasMore = offset + chunk.length < session.buffer.length;
+    const area=this.getDoc().querySelector(SEL.commentsArea);
+    const scroll=this.scrollContainer();
     return {
       sessionId: session.id,
       noteKey: session.noteKey,
@@ -257,16 +270,20 @@ export class XhsSessionManager {
       nextCursor: hasMore ? `${session.id}.${session.version}.${offset + chunk.length}` : null,
       // 只使用现有真实 fixture 证实的空评论标志；不能用“未新增”冒充平台末尾。
       endOfList: session.buffer.length === 0 && !!this.getDoc().querySelector(`${SEL.commentsArea} ${SEL.noComments}`),
+      activityVersion:session.activityVersion,
+      atBottom:scroll?scroll.scrollTop+scroll.clientHeight>=scroll.scrollHeight-2:undefined,
+      // 仅页面DOM的标准加载语义，不检查网络请求、账号状态或私有接口。
+      loadingComments:!!area&&(area.getAttribute('aria-busy')==='true'||!!area.querySelector('[aria-busy="true"],[role="progressbar"]')),
     };
   }
 
   /** 增量读取：先打码再暂存；500 条上限后停止增加。 */
-  private ingest(strict = false): void {
+  private ingest(strict = false, extracted?:ParsedComment[]): void {
     const session = this.session;
     if (!session) return;
     let parsedList: ParsedComment[];
     try {
-      parsedList = parseLoadedComments(this.getDoc(), session.noteKey);
+      parsedList = extracted ?? parseLoadedComments(this.getDoc(), session.noteKey);
     } catch (err) {
       if (strict) throw err;
       return;
@@ -278,6 +295,7 @@ export class XhsSessionManager {
         break;
       }
       const text = redactText(p.text);
+      if (!normalizeCommentText(text)) continue; // 空骨架可在后续填充时重试，不分配已保存身份。
       const parentKey = p.isSub
         ? (p.parentElementId ? session.elementKey.get(p.parentElementId) : undefined) ?? (p.parentElement ? session.sourceKeys.get(p.parentElement) : undefined) ?? (p.parentContainer ? session.sourceKeys.get(p.parentContainer) : undefined) ?? null
         : null;
@@ -301,11 +319,17 @@ export class XhsSessionManager {
         parentKey,
         ordinal,
       });
+      // 无平台ID不能因作者/短文本/相对时间相同就合并不同节点。
+      // 同一节点仍沿用ordinal；节点身份完全丢失时宁保留weak记录，不冒充强去重。
+      if(!p.platformCommentId) {
+        const owner=session.weakOwners.get(identity.commentKey);
+        if(owner&&owner!==p.sourceElement)identity.commentKey+=`:occ:${ordinal}`;
+        else session.weakOwners.set(identity.commentKey,p.sourceElement);
+      }
       session.sourceKeys.set(p.sourceElement,identity.commentKey);
       if(!p.isSub){const wrapper=p.sourceElement.closest(SEL.parentWrapper);if(wrapper)session.sourceKeys.set(wrapper,identity.commentKey);}
       if (p.elementId) session.elementKey.set(p.elementId, identity.commentKey);
       if (session.keySet.has(identity.commentKey)) continue;
-      if (!normalizeCommentText(text)) continue;
       session.keySet.add(identity.commentKey);
       session.buffer.push({
         commentKey: identity.commentKey,
@@ -333,8 +357,8 @@ export class XhsSessionManager {
     this.observer?.disconnect();
     const doc = this.getDoc();
     // 微任务即提取，避免500ms防抖期间可见项已被虚拟列表移除。
-    this.observer = new MutationObserver(() => this.checkDom());
-    this.observer.observe(doc.documentElement, { childList: true, subtree: true, characterData: true });
+    this.observer = new MutationObserver(records => this.checkDom(records));
+    this.observer.observe(doc.documentElement, { childList: true, subtree: true, characterData: true,attributes:true,attributeFilter:['id','class','aria-busy'] });
   }
 
   private scheduleCheck(): void {
@@ -345,7 +369,7 @@ export class XhsSessionManager {
     }, LIMITS.observerDebounceMs);
   }
 
-  private checkDom(): void {
+  private checkDom(records:MutationRecord[]=[]): void {
     if (!this.session) return;
     const doc = this.getDoc();
     if (pageBlocked(doc)) {
@@ -363,6 +387,30 @@ export class XhsSessionManager {
       return;
     }
     if (!doc.querySelector(SEL.commentsArea)) return;
+    if(currentNoteKey!==this.session.noteKey)return;
+    const list=doc.querySelector(SEL.listContainer);if(list)this.knownLists.add(list);
+    const area=doc.querySelector(SEL.commentsArea);if(area)this.knownAreas.add(area);
+    // 先处理来自已确认列表的变更记录。只重扫live DOM会丢失同一任务中插入又移除的节点。
+    const scopes:Element[]=[];
+    for(const record of records) {
+      let inList=false,inArea=false;
+      let ancestor:Node|null=record.target;
+      while(ancestor){if(ancestor.nodeType===1){inList ||=this.knownLists.has(ancestor as Element);inArea ||=this.knownAreas.has(ancestor as Element);}ancestor=ancestor.parentNode;}
+      for(const node of [...record.addedNodes,...record.removedNodes]) {
+        if(node.nodeType!==1)continue;
+        const el=node as Element;
+        if(inList)scopes.push(el);
+        else if(inArea) {
+          // 整个列表替换：只找已知列表结构，不能把评论区内列表外的推荐当评论。
+          const lists=[...(el.matches('.list-container')?[el]:[]),...el.querySelectorAll('.list-container')];
+          for(const candidate of lists){this.knownLists.add(candidate);scopes.push(candidate);}
+        }
+      }
+    }
+    // 相同内容的重复重渲染不是持续加载；避免虚拟列表无变化重绘阻止有界收尾。
+    const activityText=list?.textContent??'';
+    if(records.some(r=>list?.contains(r.target)||area===r.target)&&activityText!==this.session.activityText){this.session.activityVersion++;this.session.activityText=activityText;}
+    for(const scope of scopes){if(this.session.limitReached)break;this.ingest(false,parseCommentSubtree(scope,this.session.noteKey));}
     this.ingest();
   }
 

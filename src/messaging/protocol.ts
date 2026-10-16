@@ -98,6 +98,9 @@ export const SnapshotPayload = z.object({
   nextCursor: z.string().max(256).nullable(),
   endOfList: z.boolean().optional(),
   loadingReplies: z.boolean().optional(),
+  activityVersion:z.number().int().nonnegative().optional(),
+  atBottom:z.boolean().optional(),
+  loadingComments:z.boolean().optional(),
 });
 export type SnapshotPayload = z.infer<typeof SnapshotPayload>;
 

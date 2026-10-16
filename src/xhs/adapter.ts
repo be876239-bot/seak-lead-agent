@@ -77,18 +77,28 @@ function countOf(text: string | null): number | null {
   return num ? Number(num[1]) : null;
 }
 
+/** 字段必须属于这一条评论，不能误读嵌套回复的作者/正文。 */
+function owned(el:Element,selector:string):Element|null {
+  return [...el.querySelectorAll(selector)].find(node=>node.closest('.comment-item')===el)??null;
+}
+export function rootComment(wrapper:Element):Element|null {
+  return [...wrapper.querySelectorAll(SEL.commentItem)].find(el=>el.closest(SEL.parentWrapper)===wrapper)??null;
+}
 function parseItem(el: Element, noteKey: string, isSub: boolean, parentElementId: string | null, parentElement: Element | null = null, parentContainer: Element | null = null): ParsedComment {
-  const rawId = (el.getAttribute('id') || '').startsWith(SEL.commentIdAttrPrefix) ? el.getAttribute('id') : null;
+  const id=el.getAttribute('id')??'';
+  const rawId = id.startsWith(SEL.commentIdAttrPrefix)&&id.length>SEL.commentIdAttrPrefix.length ? id : null;
   const platformCommentId = rawId ? rawId.slice(SEL.commentIdAttrPrefix.length) : null;
-  const authorA = el.querySelector(SEL.authorLink);
+  const authorA = owned(el,SEL.authorLink);
   const name = (authorA?.textContent || '').trim();
   const href = authorA?.getAttribute('href') || null;
   const path = href ? /^\/user\/profile\/[^/?#]+/.exec(href)?.[0] ?? null : null;
   const profileUrl = path ? `https://www.xiaohongshu.com${path}` : null;
   const authorLocalKey = path ? path.split('/').pop() ?? null : null;
-  const content = el.querySelector(SEL.content);
+  const content = owned(el,SEL.content);
   let text = (content?.textContent || '').trim();
-  if (!text && content?.querySelector('img,svg,canvas')) text = '[non-text-comment]';
+  // 图片可在已确认的.content内、但不在.note-text内；只保留占位，不读取图片或整页文字。
+  const body=owned(el,'.content');
+  if (!text && body && [...body.querySelectorAll('img,svg,canvas')].some(node=>node.closest('.comment-item')===el)) text = '[non-text-comment]';
   const truncated = text.length > LIMITS.maxCommentChars;
   text = text.slice(0, LIMITS.maxCommentChars);
   return {
@@ -122,6 +132,11 @@ export function parseLoadedComments(doc: Document, noteKey: string): ParsedComme
     if (area.querySelector(SEL.noComments)) return [];
     throw new AppError('PARSE_FAILED', '未找到评论列表容器');
   }
+  return parseCommentSubtree(list,noteKey);
+}
+
+/** 调用方必须先证明scope来自已确认列表；也用于MutationRecord中刚移除的子树。 */
+export function parseCommentSubtree(scope:Element,noteKey:string):ParsedComment[] {
   const out: ParsedComment[] = [];
   const seen = new Set<Element>();
 
@@ -129,12 +144,14 @@ export function parseLoadedComments(doc: Document, noteKey: string): ParsedComme
   // 虚拟列表重渲染时包装层/评论层可能短暂改变；只要 comment-item
   // 仍位于已确认的 listContainer 内，就解析它。范围仍严格限制在评论列表，
   // 不做全页文本兜底，也不会把互动区的元素当评论。
-  for (const el of list.querySelectorAll(`${SEL.commentItem},${SEL.subCommentItem}`)) {
+  const selector=`${SEL.commentItem},${SEL.subCommentItem}`;
+  const elements=[...(scope.matches(selector)?[scope]:[]),...scope.querySelectorAll(selector)];
+  for (const el of elements) {
     if (seen.has(el)) continue;
     seen.add(el);
     const isSub = el.classList.contains('comment-item-sub');
     const wrapper = el.closest(SEL.parentWrapper);
-    const top = wrapper?.querySelector(':scope > .comment-item:not(.comment-item-sub)') ?? null;
+    const top = wrapper ? rootComment(wrapper) : null;
     if (!isSub) {
       out.push(parseItem(el, noteKey, false, null, null, wrapper));
       continue;
@@ -150,8 +167,8 @@ export function parseLoadedComments(doc: Document, noteKey: string): ParsedComme
 export function replyExpandControls(doc: Document): {control:HTMLElement;parent:Element}[] {
   const list=doc.querySelector(SEL.listContainer);if(!list)return [];
   const found:{control:HTMLElement;parent:Element}[]=[];
-  for(const wrapper of list.querySelectorAll(':scope > .parent-comment')) {
-    const parent=wrapper.querySelector(':scope > .comment-item:not(.comment-item-sub)')??wrapper;
+  for(const wrapper of list.querySelectorAll(SEL.parentWrapper)) {
+    const parent=rootComment(wrapper)??wrapper;
     for(const control of wrapper.querySelectorAll<HTMLElement>(`${SEL.replyContainer} ${SEL.showMore}`)) {
       if(control.closest(SEL.parentWrapper)!==wrapper || control.closest('.interactions,form') || control.hasAttribute('href') || control.hasAttribute('disabled') || control.getAttribute('aria-disabled')==='true')continue;
       const text=(control.textContent??'').replace(/\s+/g,' ').trim();

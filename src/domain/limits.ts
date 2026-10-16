@@ -32,6 +32,7 @@ export const LIMITS = {
   captureMessageTimeoutMs: 10_000,
   captureSamplesPerRound: 5,
   captureIdleRounds: 4,
+  captureQuietMs: 15_000,
   captureMaxRounds: 200,
   captureMaxDurationMs: 180_000,
   lockRenewIntervalMs: 5_000,

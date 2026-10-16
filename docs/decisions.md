@@ -1,5 +1,11 @@
 # 决策记录
 
+## D013 2026-10-17 评论发现与累计的少量漏采修复
+- 基线925ae86，312项原测试通过；审计后先补红测，限定评论容器，不改AI/产品/缓存/DB架构。
+- MutationObserver使用已确认列表来源的addedNodes/removedNodes，兼容整个list-container替换；保留原换帖/平台守卫。不同弱节点碰撞加序号，同节点/强ID去重不变；空comment-视为无ID。完全重建的弱节点可能重复，明确标弱，不牺牲已证明不同的评论。
+- 半屏步长，上限400px、不再120px最小跨屏；滚动和到底状态共用祖先。no_new需到底、无加载、15秒安静和连续4轮，新增/内容变化重置；ARIA加载只看DOM语义，不检查网络。500总条数、3分钟/200轮和任务10分钟保持。
+- 包装根评论/回复入口改为所属wrapper定位；媒体仅评论自身content内占位，不扫描整页。新增24项、总336项通过；旧测试只补JSDOM滚动位置模型，原结果断言保留。无现网验证，见comment-recall-2026-10-17.md。
+
 ## D012 2026-10-16 正常卡片点击与原搜索页返回
 - 审计基线34e2c38：原DiscoveryBrowser新建about:blank标签，再tabs.update目标URL；不走真实卡片入口，也不返回搜索页。用户报告该路径出现笔记不可浏览/扫码提示，但其平台原因不能由代码审计确定。
 - 用户授权正常页面交互。改为复用sourceTabId，内容脚本按笔记ID重查当前可见section.note-item a[href]，优先cover，scrollIntoView后再验上下文并click()；不改变href/target、location/history、不创建任务标签。采集后tabs.goBack一次，核验原搜索地址及详情已关闭，再重新查下一张卡片。程序化click不伪装isTrusted，不承诺平台接受。
