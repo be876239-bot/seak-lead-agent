@@ -34,9 +34,9 @@ describe('bounded serial discovery', () => {
     await task.run(); expect(task.state.status).toBe('paused'); expect(deps.navigate).not.toHaveBeenCalled();
     await task.run(); expect(guard).toHaveBeenCalledTimes(2); expect(deps.navigate).not.toHaveBeenCalled();
   });
-  it('500-comment guard pauses at the completed post boundary until explicit continue', async () => {
+  it('500-comment per-post cap allows all five posts to finish automatically', async () => {
     const {task,deps}=setup({process: async (_u,_s,p) => { p(500,1); }}); await task.run();
-    expect(task.state.status).toBe('paused'); expect(task.state.post?.stage).toBe('completed'); expect(deps.navigate).toHaveBeenCalledTimes(1); expect(task.state.reason).toContain('500');
+    expect(task.state.status).toBe('completed'); expect(deps.navigate).toHaveBeenCalledTimes(5); expect(task.state.comments).toBe(2500); expect(task.state.reason).toBeNull();
   });
   it('wall-clock deadline stops without another navigation', async () => {
     let now=0; const {task,deps}=setup({now:()=>now,process:async()=>{now=600001;}}); await task.run();
@@ -100,6 +100,6 @@ it('返回搜索失败时保留已完成索引，手动继续只重试返回，�
  const finish=vi.fn(async()=>{if(finish.mock.calls.length===1)throw new Error('返回失败');});const {deps}=setup();const task=new SerialDiscovery(urls.slice(0,1),{...deps,finish});
  await task.run();expect(task.state.status).toBe('paused');expect(task.state.index).toBe(1);await task.run();expect(task.state.status).toBe('completed');expect(deps.process).toHaveBeenCalledTimes(1);expect(finish).toHaveBeenCalledTimes(2);
 });
-it('500条后不再执行返回或其他导航，10分钟边界同样保护收尾动作',async()=>{
- const finish=vi.fn(async()=>{});const {task}=setup({finish,process:async(_u,_s,p)=>{p(500,1);}});await task.run();expect(finish).not.toHaveBeenCalled();expect(task.state.reason).toContain('500');
+it('500条单帖上限不阻止后续帖子和最终返回搜索',async()=>{
+ const finish=vi.fn(async()=>{});const {task}=setup({finish,process:async(_u,_s,p)=>{p(500,1);}});await task.run();expect(finish).toHaveBeenCalledTimes(1);expect(task.state.status).toBe('completed');
 });

@@ -1,5 +1,7 @@
 # 觅客Agent MVP 开发 TODO
 
+2026-10-17 最新（D015）：已移除单帖500条后的自动暂停，保留完成检查点与异常/手动恢复；新增6项、总360项通过，typecheck/lint/build/Edge ZIP通过。用户确认上一版暂停/继续人工验收通过，本轮连续多帖流程F仍NOT VERIFIED。见 `docs/discovery-continuous-2026-10-17.md`。
+
 2026-10-17 最新（D014）：完成多帖暂停/继续检查点修复，新增18项，32文件354项测试通过，typecheck/lint/build/Edge ZIP通过。Edge真实页面已可读取，但新版扩展真实流程仍NOT VERIFIED，用户选择先交付；T29/T30不关闭。详见 `docs/discovery-resume-2026-10-17.md`。
 
 2026-10-17 最新（D013）：少量评论漏采修复，24项新增回归，31文件336项全量通过，typecheck/lint/build/Edge ZIP与diff检查通过。短暂节点/列表替换、弱身份误合并、半屏滚动、15秒安静收尾、包装回复和媒体占位详见 `docs/comment-recall-2026-10-17.md`。真实Edge绑定Debugger unattached，用户选择先交付；E浏览器/F真实小红书NOT VERIFIED，不更新T29/T30完成状态。

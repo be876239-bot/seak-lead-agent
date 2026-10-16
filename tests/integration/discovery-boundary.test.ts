@@ -27,13 +27,12 @@ describe('post completion boundaries',()=>{
   await task.run();expect(task.state.index).toBe(index);await task.run();
   expect(calls).toEqual(index===0?['note-a','note-a','note-b']:['note-a','note-b','note-b']);
  });
- it('500 is a post boundary: explicit continue reaches B without recapturing A',async()=>{
+ it('500 is a post boundary: automatically reaches B without recapturing A',async()=>{
   const {deps,task}=setup({process:vi.fn(async(_u,_s,p)=>{p(500,1);})});
-  await task.run();expect(task.state.status).toBe('paused');expect(deps.navigate).toHaveBeenCalledTimes(1);
-  await task.run();expect(task.state.status).toBe('completed');expect(vi.mocked(deps.process).mock.calls.map(c=>c[0])).toEqual(urls);
+  await task.run();expect(task.state.status).toBe('completed');expect(deps.navigate).toHaveBeenCalledTimes(2);expect(vi.mocked(deps.process).mock.calls.map(c=>c[0])).toEqual(urls);
  });
  it('stop at boundary never navigates to B',async()=>{
-  const {deps,task}=setup({process:async(_u,_s,p)=>{p(500,1);}});
+  const {deps,task}=setup({process:async(_u,_s,p,checkpoint)=>{p(500,1);await checkpoint.completed();task.stop();}});
   await task.run();task.stop();await task.run();expect(deps.navigate).toHaveBeenCalledTimes(1);expect(task.state.status).toBe('stopped');
  });
  it('platform failure during unfinished processing does not skip the note',async()=>{
@@ -60,7 +59,7 @@ describe('post completion boundaries',()=>{
   await task.run();expect(task.state.status).toBe('stopped');expect(deps.navigate).toHaveBeenCalledTimes(1);
  });
  it('boundary continue keeps the original ten minute deadline',async()=>{
-  let now=0;const {deps,task}=setup({now:()=>now,process:async(_u,_s,p)=>{p(500,1);}});
+  let now=0;const {deps,task}=setup({now:()=>now,process:async(_u,_s,p,checkpoint)=>{p(500,1);await checkpoint.completed();task.pause();}});
   await task.run();now=600001;await task.run();expect(task.state.status).toBe('stopped');expect(deps.navigate).toHaveBeenCalledTimes(1);
  });
  it('does not process B until navigation and readiness for B finish',async()=>{

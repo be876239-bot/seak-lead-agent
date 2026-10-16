@@ -44,6 +44,15 @@ export class SerialDiscovery {
     if(this.controller.signal.aborted || this.state.status!=='running') throw new Error('任务已暂停或停止');
   }
   async flush() { await this.writes; }
+  private async advanceToNextPost() {
+    this.live();
+    if(this.state.post?.stage!=='completed')throw new Error('当前帖子尚未完成');
+    // Completion is already persisted. Persist the next position before navigation.
+    this.state.index++;this.state.post={stage:'capturing',commentKeys:[]};
+    this.state.currentComments=0;this.state.currentLeads=0;
+    this.state.phase=this.state.index<this.urls.length?'下一篇准备就绪':'所有目标帖子已完成，正在收尾';
+    this.publish();await this.flush();this.live();
+  }
   run(): Promise<void> {
     if(this.pending) return this.pending;
     if(this.state.status==='completed'||this.state.status==='stopped') return Promise.resolve();
@@ -65,8 +74,7 @@ export class SerialDiscovery {
     try {
       while(this.state.index<this.urls.length) {
         if(this.state.post?.stage==='completed') {
-          this.live();this.state.index++;this.state.post={stage:'capturing',commentKeys:[]};
-          this.state.currentComments=0;this.state.currentLeads=0;this.state.phase='下一篇准备就绪';this.publish();await this.flush();this.live();
+          await this.advanceToNextPost();
           continue;
         }
         this.live();await this.deps.guard();this.live();
@@ -90,9 +98,6 @@ export class SerialDiscovery {
         },{post:this.state.post,captured:keys=>checkpoint('captured',keys),completed:()=>checkpoint('completed')});
         // Persist successful processing BEFORE any fallible page check or next navigation.
         this.live();await checkpoint('completed');
-        if(this.state.currentComments>=500 && this.state.index+1<this.urls.length) {
-          this.pause('当前帖子已完成（500条安全上限），继续将处理下一篇');return;
-        }
       }
       if(this.deps.finish){this.live();this.state.phase='正在返回搜索结果';this.publish();await this.deps.finish(signal);this.live();}
       this.state.status='completed';this.state.phase='本次任务已结束（不代表全部评论）';this.publish();
