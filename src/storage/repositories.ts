@@ -291,7 +291,7 @@ export class Repositories {
       const running = await this.db.jobs.filter((j) => j.status === 'collecting' || j.status === 'analyzing').toArray();
       const ids: string[] = [];
       for (const job of running) {
-        await this.db.jobs.update(job.id, { status: 'interrupted', updatedAt: nowIso() });
+        await this.db.jobs.update(job.id, { status: 'interrupted', updatedAt: nowIso(), ...(job.discovery?{discovery:{...job.discovery,status:'paused' as const,phase:'任务已暂停',reason:'后台已中断，请检查页面后手动继续；不会自动恢复'}}:{}) });
         const openBatches = await this.db.batches.where('jobId').equals(job.id)
           .filter((b) => b.status === 'running' || b.status === 'pending').toArray();
         for (const b of openBatches) {

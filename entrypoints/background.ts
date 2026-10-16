@@ -1,3 +1,4 @@
+import { registerDiscoveryHandlers } from '../src/discovery/jobs';
 import { handleBackgroundMessage } from '../src/messaging/handlers';
 import { registerProductHandlers } from '../src/product/handlers';
 import { analysisLock, registerAnalysisHandlers } from '../src/analysis/jobs';
@@ -7,6 +8,7 @@ import { getDb } from '../src/storage/db';
 export default defineBackground(() => {
   registerProductHandlers();
   registerAnalysisHandlers();
+  registerDiscoveryHandlers();
   // 启动恢复：上次进程遗留的运行中任务标 interrupted（不依赖 unload 事件）
   void analysisLock.recoverInterrupted()
     .then(() => ensureDailyRetention(getDb()))

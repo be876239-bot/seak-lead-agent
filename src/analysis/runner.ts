@@ -328,7 +328,7 @@ function jobFinalStatus(outcome: Outcome, rows: Batch[]): { status: Job['status'
 export async function runCommentsJob(
   deps: RunnerDeps,
   spec: {
-    productId: string; note: Note; comments: Comment[]; jobId?: string; tabId?: number | null;
+    productId: string; note: Note; comments: Comment[]; jobId?: string; tabId?: number | null; signal?: AbortSignal;
     onProgress?: (p: ProgressInfo) => void; log?: (m: string) => void;
   },
 ): Promise<Job> {
@@ -345,7 +345,9 @@ export async function runCommentsJob(
   else await deps.repos.createJob(job);
 
   let handle: LockHandle | null = null;
+  const abort = () => { if(handle) void deps.lock.cancel(handle); };
   try {
+    if(spec.signal?.aborted) throw new AppError('CANCELLED','任务已停止');
     const product = await deps.repos.getProduct(spec.productId);
     if (!product) throw new AppError('STORAGE_ERROR', '产品不存在');
     const comments = dedupeComments(spec.comments);
@@ -353,6 +355,8 @@ export async function runCommentsJob(
       if (c.noteKey !== spec.note.noteKey) throw new AppError('PAGE_CHANGED', '评论与笔记不匹配，拒绝把旧快照写入新笔记');
     }
     handle = await deps.lock.acquire(LOCK_NAME, jobId);
+    spec.signal?.addEventListener('abort',abort,{once:true});
+    if(spec.signal?.aborted) { abort(); throw new AppError('CANCELLED','任务已停止'); }
 
     const { candidates, parentLookup } = buildCandidates(deps, product, spec.note, comments);
     const existing = await deps.repos.existingCacheKeys(candidates.map((c) => c.cacheKey));
@@ -392,6 +396,7 @@ export async function runCommentsJob(
     await deps.repos.updateJob(jobId, { status, errorCode: e.code });
     throw e;
   } finally {
+    spec.signal?.removeEventListener('abort',abort);
     if (handle) await deps.lock.release(handle);
   }
 }

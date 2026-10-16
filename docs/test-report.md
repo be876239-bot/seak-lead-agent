@@ -118,3 +118,13 @@ Edge ZIP可正常读取，11项资源；包内JS/JSON/HTML与edge-mv3构建逐�
 冻结范围核验：git diff检查确认prompts.ts、classification.ts、cache.ts、batching.ts、runner.ts均无本轮修改。未新增JEV、数字评分、模型、平台、支付或云端任务。
 
 **真实验收：NOT VERIFIED。** 新Edge包未在用户真实小红书页面加载；验证码/评论权限、真实滚动容器和懒加载兼容性、MV3休眠/恢复均未验证。不声称采集全部。下一步按增量采集报告的真实验收步骤执行，不手动助载，并检查首屏数据留存、数量增长、去重和取消。
+
+## 8. 2026-10-16 有界串行寻找任务（最新）
+
+基线aa29320；D010授权当前搜索结果→最多5篇单页串行任务。最终27文件/273项通过，typecheck/lint/Edge及Chrome ZIP通过；完整测试矩阵、停止边界与安装包哈希见 `serial-discovery-2026-10-16.md`。
+
+新增38项：搜索DOM/串行任务26、浏览器导航9、生产处理器组合闭环1、恢复评论种子1、外部取消AI迟到写入1。组合测试两篇各20→40且首屏离开DOM，IndexedDB各40、总80、80条模拟Lead；后台中断不自动恢复，手动继续复用原时限/标签/评论/缓存且没有新增模型调用。真实浏览器合成UI实际点击开始→暂停→继续→停止，截图见evidence/discovery-ui-synthetic-*.png；消息、产品和采集使用合成数据，不能当真实小红书证明。
+
+Edge/Chrome ZIP各358190 B、11项，SHA256 d7e875db7e5937ffd87eda7b22a764c5fdb885e2d0da4df72a21a08b778c2122；逐项匹配构建，未包含.env/tests/eval/node_modules/.scratch，Key格式扫描0命中，manifest权限未增加。AI Prompt/分组/缓存键/批次/数据库表结构未改；runner仅新增外部signal桥接既有取消锁，jobs表仅新增可选任务元数据。
+
+**真实小红书：NOT VERIFIED。** Edge标签连接超时，未执行真实任务；用户明确要求先交付代码与验收步骤。未证明账号不会受限制、所有风控提示都可识别或评论已采全。历史T29/T30不勾选。

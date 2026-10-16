@@ -19,7 +19,7 @@ export const analysisLock = new TaskLockManager(analysisRepos);
 
 const nowIso = () => new Date().toISOString();
 
-async function makeDeps(): Promise<RunnerDeps> {
+export async function makeDeps(): Promise<RunnerDeps> {
   const cred = await loadCredential();
   if (!cred || !cred.apiKey.trim()) throw new AppError('AI_AUTH', '未配置 API Key，请先在设置页保存');
   const baseUrl = resolveBaseUrl(cred);
@@ -37,7 +37,7 @@ const TERMINAL: Job['status'][] = ['completed', 'partial', 'failed', 'cancelled'
 /** 采集阶段（尚未持锁）的可取消标记；进入 runner 后由锁句柄负责取消。 */
 const capturing = new Map<string, { cancelled: boolean; controller?: AbortController }>();
 
-function baseJob(deps: RunnerDeps, id: string): Job {
+export function baseJob(deps: RunnerDeps, id: string): Job {
   return {
     id, kind: 'product', status: 'created', ownerId: '', generation: 0,
     productId: null, profileVersion: null, tabId: null, noteKey: null,

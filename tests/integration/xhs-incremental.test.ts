@@ -175,3 +175,9 @@ it('少量评论不足一屏仍可正常停止，不误报滚动容器缺失', a
   expect(result.stopReason).toBe('no_new');
   expect(result.comments).toHaveLength(20);
 });
+
+it('恢复采集保留已落库评论，并在滚动前按剩余额度截断写入，累计最多500', async () => {
+  const previous: Comment[] = Array.from({length:490},(_,i)=>({commentKey:`old-${i}`,noteKey:'xhs:aaaaaaaaaaaaaaaaaaaaaaaa',platformCommentId:`old-${i}`,parentKey:null,text:'已保存的合成评论',authorDisplayName:null,authorLocalKey:null,profileUrl:null,publishedText:null,publishedAt:null,likeCount:null,capturedAt:new Date().toISOString(),identityQuality:'strong',truncated:false}));
+  const result=await captureNote(7,{autoLoad:true,wait,initialComments:previous,onDelta:persist});
+  expect(result.comments).toHaveLength(500); expect(await db.comments.count()).toBe(10);expect(scroll).not.toHaveBeenCalled();
+});

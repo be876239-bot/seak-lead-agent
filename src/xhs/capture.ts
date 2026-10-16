@@ -16,7 +16,7 @@ export type CapturedNote = {
   stopReason?: CaptureProgress['stopReason'];
 };
 
-async function ask(tabId: number, req: Request, signal?: AbortSignal): Promise<unknown> {
+export async function ask(tabId: number, req: Request, signal?: AbortSignal): Promise<unknown> {
   let raw: unknown;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let abort: (() => void) | undefined;
@@ -45,12 +45,13 @@ async function ask(tabId: number, req: Request, signal?: AbortSignal): Promise<u
 }
 
 /** 面板用于显示当前标签页状态的只读查询。 */
-export async function getNoteStatus(tabId: number): Promise<XhsStatusPayload> {
-  return XhsStatusPayload.parse(await ask(tabId, buildRequest('XHS_GET_STATUS', {})));
+export async function getNoteStatus(tabId: number, signal?: AbortSignal): Promise<XhsStatusPayload> {
+  return XhsStatusPayload.parse(await ask(tabId, buildRequest('XHS_GET_STATUS', {}), signal));
 }
 
 export type CaptureOptions = {
   autoLoad?: boolean;
+  initialComments?: Comment[];
   signal?: AbortSignal;
   onDelta?: (note: Note, comments: Comment[]) => Promise<void>;
   onProgress?: (progress: CaptureProgress) => Promise<void> | void;
@@ -80,7 +81,9 @@ export async function captureNote(tabId: number, options: CaptureOptions = {}): 
   if (status.blocked) throw new AppError('PAGE_BLOCKED', '平台限制：登录或风控遮挡，请手动处理后重试');
   if (!status.supported || !status.noteKey) throw new AppError('PAGE_UNSUPPORTED', '当前标签页不是受支持的小红书笔记页');
   const expectedNoteKey = status.noteKey;
-  const found = new Map<string, Comment>();
+  const initial=options.initialComments??[];
+  if(initial.some(c=>c.noteKey!==expectedNoteKey))throw new AppError('PAGE_CHANGED','本地评论与当前笔记不匹配');
+  const found = new Map<string, Comment>(initial.slice(0,LIMITS.maxSessionComments).map(c=>[c.commentKey,c]));
   let first: SnapshotPayload | null = null;
   let stopPromise: Promise<unknown> | null = null;
   const stop = () => {
@@ -103,7 +106,7 @@ export async function captureNote(tabId: number, options: CaptureOptions = {}): 
     }
     note ??= page.note;
     if (!note) throw new AppError('PARSE_FAILED', '未能解析笔记内容');
-    const delta = page.comments.filter((c) => !found.has(c.commentKey));
+    const delta = page.comments.filter((c) => !found.has(c.commentKey)).slice(0,LIMITS.maxSessionComments-found.size);
     if (delta.some((c) => c.noteKey !== expectedNoteKey)) throw new AppError('PAGE_CHANGED', '快照混入其他笔记评论');
     if ((delta.length || found.size === 0) && options.onDelta) {
       try { await options.onDelta(note, delta); }

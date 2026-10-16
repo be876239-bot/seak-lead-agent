@@ -32,7 +32,7 @@ export type ParsedComment = {
   truncated: boolean;
 };
 
-const NOTE_ID_RE = /\/(?:explore|item|discovery\/item)\/([0-9a-z]{24})/;
+const NOTE_ID_RE = /\/(?:explore|search_result|item|discovery\/item)\/([0-9a-z]{24})/;
 
 export function detectPage(doc: Document): 'note' | 'unsupported' | 'blocked' {
   const root = doc.querySelector(SEL.noteRoot);

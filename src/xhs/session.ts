@@ -1,3 +1,4 @@
+import { platformBlock, readSearchNotes } from './discovery-dom';
 import { AppError } from '../domain/errors';
 import { LIMITS } from '../domain/limits';
 import { commentIdentity, normalizeCommentText, parsePublishedAt } from '../domain/identity';
@@ -21,7 +22,7 @@ function isoNow(now: () => number): string {
 
 /** 登录遮挡即使笔记容器仍在 DOM 也必须停止采集。 */
 function pageBlocked(doc: Document): boolean {
-  return detectPage(doc) === 'blocked' || !!doc.querySelector(SEL.loginOverlay);
+  return detectPage(doc) === 'blocked' || platformBlock(doc) !== null;
 }
 
 /** 解码 cursor（不透明字符串）；任何不匹配都视为失效。 */
@@ -67,6 +68,8 @@ export class XhsSessionManager {
   async handle(req: Request): Promise<unknown> {
     switch (req.type) {
       case 'XHS_GET_STATUS': return this.status();
+      case 'XHS_DISCOVER': return { urls: readSearchNotes(this.getDoc(), this.getDoc().URL) };
+      case 'XHS_GUARD': { const reason=platformBlock(this.getDoc()); if(reason) throw new AppError('PAGE_BLOCKED',reason); return {ok:true}; }
       case 'XHS_START_SESSION': return this.start(req.payload.expectedNoteKey);
       case 'XHS_GET_SNAPSHOT': return this.snapshot(req.payload.sessionId, req.payload.expectedNoteKey, req.payload.cursor, req.payload.advance);
       case 'XHS_STOP_SESSION': return this.stop(req.payload.sessionId);
@@ -77,7 +80,7 @@ export class XhsSessionManager {
   private status(): XhsStatusPayload {
     const doc = this.getDoc();
     const kind = detectPage(doc);
-    if (kind === 'blocked') {
+    if (kind === 'blocked' || platformBlock(doc)) {
       return { noteKey: null, parserVersion: PARSER_VERSION, supported: false, blocked: true };
     }
     let noteKey: string | null = null;

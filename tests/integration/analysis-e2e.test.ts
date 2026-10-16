@@ -376,3 +376,10 @@ describe('G2 mock 端到端闭环（产品→当前页→分析→保存→再�
     expect((await db.analyses.toArray()).length).toBe(11);
   });
 });
+
+it('外部寻找任务signal取消分析：迟到模型结果不能写Lead，已存在数据保留',async()=>{
+ const provider=new MockProvider({profile:profileScript});const product=await makeProduct(provider);const snap=await captureFromFixture();const ac=new AbortController();
+ provider.classifyComments=async input=>{ac.abort();return {value:goldClassification(input),model:'mock-model',usage:{inputTokens:12,outputTokens:8}};};
+ const job=await runCommentsJob(deps(provider),{productId:product.id,note:snap.note!,comments:snap.comments,signal:ac.signal});
+ expect(job.status).toBe('cancelled');expect(await db.analyses.count()).toBe(0);expect(await db.comments.count()).toBe(26);
+});

@@ -144,7 +144,7 @@ export const LeadStateSchema = z.object({
 });
 export type LeadState = z.infer<typeof LeadStateSchema>;
 
-export const JobKind = z.enum(['product', 'comments']);
+export const JobKind = z.enum(['product', 'comments', 'discovery']);
 export const CaptureProgressSchema = z.object({
   discoveredCount: z.number().int().min(0).max(LIMITS.maxSessionComments),
   addedCount: z.number().int().min(0).max(LIMITS.maxSessionComments),
@@ -175,6 +175,12 @@ export const JobSchema = z.object({
   updatedAt: UtcIso,
   errorCode: z.string().max(64).nullable(),
   collection: CaptureProgressSchema.optional(),
+  discovery: z.object({
+    status:z.enum(['running','paused','stopped','completed']),index:z.number().int().min(0).max(5),total:z.number().int().min(0).max(5),
+    comments:z.number().int().nonnegative(),currentComments:z.number().int().min(0).max(500),leads:z.number().int().nonnegative(),currentLeads:z.number().int().nonnegative(),
+    targets:z.array(z.string().url().max(LIMITS.maxUrlChars)).max(5),sourceTabId:z.number().int().nonnegative(),
+    phase:z.string().max(300),reason:z.string().max(500).nullable(),deadline:z.number(),direction:z.string().max(200),
+  }).optional(),
 });
 export type Job = z.infer<typeof JobSchema>;
 
