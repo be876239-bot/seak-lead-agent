@@ -24,16 +24,20 @@ async function launch(spec:{jobId:string;productId:string;tabId:number;direction
     changed:async state=>{
       await analysisRepos.updateJob(jobId,{
         status:state.status==='running'?'collecting':state.status==='paused'?'interrupted':state.status==='stopped'?'cancelled':'completed',
-        tabId:page.tabId,completedItems:state.index,discovery:{...state,direction,targets:urls,sourceTabId:tabId,navigation:{...page.navigation},completedNoteKeys:urls.slice(0,state.index).map(noteKeyFromUrl)},
+        tabId:page.tabId,completedItems:state.index+(state.post?.stage==='completed'?1:0),discovery:{...state,direction,targets:urls,sourceTabId:tabId,navigation:{...page.navigation},completedNoteKeys:urls.slice(0,state.index+(state.post?.stage==='completed'?1:0)).map(noteKeyFromUrl)},
       });
     },
-    process:async(url,signal,progress)=>{
+    process:async(url,signal,progress,checkpoint)=>{
       const expected=noteKeyFromUrl(url);const childId=crypto.randomUUID();
       await analysisRepos.createJob({...baseJob(deps,childId),kind:'comments',status:'collecting',productId,tabId:page.tabId,noteKey:expected,promptVersion:COMMENT_PROMPT_VERSION});
       let acceptingProgress=true;
       try {
-        const initialComments=(await analysisRepos.commentsForNote(expected)).slice(0,500);
-        const snap=await captureNote(page.tabId!,{autoLoad:true,signal,initialComments,
+        const storedComments=await analysisRepos.commentsForNote(expected);
+        const initialComments=storedComments.slice(0,500);
+        const restoredNote=checkpoint.post?.stage==='captured'?await analysisRepos.getNote(expected):null;
+        const savedComments=checkpoint.post?.stage==='captured'?checkpoint.post.commentKeys.map(key=>storedComments.find(c=>c.commentKey===key)):[];
+        if(checkpoint.post?.stage==='captured' && (!restoredNote || savedComments.some(c=>!c)))throw new AppError('STORAGE_ERROR','已完成采集的本地快照不完整，请检查本地数据后重新启动任务');
+        const snap=checkpoint.post?.stage==='captured'?{noteKey:expected,note:restoredNote!,comments:savedComments.filter((c):c is NonNullable<typeof c>=>!!c),stopReason:undefined}:await captureNote(page.tabId!,{autoLoad:true,signal,initialComments,
           onDelta:async(note,comments)=>{
             assertRunning(signal);if(note.noteKey!==expected || comments.some(c=>c.noteKey!==expected))throw new AppError('PAGE_CHANGED','评论与任务笔记不一致，拒绝落库');
             await analysisRepos.saveCaptureDelta(childId,note,comments,signal);
@@ -42,6 +46,7 @@ async function launch(spec:{jobId:string;productId:string;tabId:number;direction
         });
         assertRunning(signal);if(snap.noteKey!==expected)throw new AppError('PAGE_CHANGED','采集笔记不一致');
         if(snap.stopReason==='time_limit'||snap.stopReason==='round_limit')throw new AppError('PARSE_FAILED','评论加载达到时间/轮次上限，请人工检查后继续');
+        await checkpoint.captured(snap.comments.map(c=>c.commentKey));
         await page.guard();assertRunning(signal);progress(snap.comments.length,0,'正在分析评论……');
         const refreshLeads=async()=>{
           const analyses=await analysisRepos.analysesFor(productId,snap.comments.map(c=>c.commentKey));
@@ -56,6 +61,7 @@ async function launch(spec:{jobId:string;productId:string;tabId:number;direction
         const analyses=await analysisRepos.analysesFor(productId,snap.comments.map(c=>c.commentKey));
         const leads=new Set(analyses.filter(a=>a.group==='high_intent'||a.group==='need').map(a=>a.commentKey)).size;
         progress(snap.comments.length,leads,'本帖分析完成，结果已保存到线索');
+        await checkpoint.completed();
       } catch(e) {
         const child=await analysisRepos.getJob(childId);
         if(child && ['created','collecting','analyzing'].includes(child.status))await analysisRepos.updateJob(childId,{status:signal.aborted?'cancelled':'failed',errorCode:toErrorPayload(e).code});

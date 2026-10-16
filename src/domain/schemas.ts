@@ -189,6 +189,7 @@ export const JobSchema = z.object({
     comments:z.number().int().nonnegative(),currentComments:z.number().int().min(0).max(500),leads:z.number().int().nonnegative(),currentLeads:z.number().int().nonnegative(),
     navigation:DiscoveryNavigationSchema.optional(),
     completedNoteKeys:z.array(z.string().max(256)).max(5).optional(),
+    post:z.object({stage:z.enum(['capturing','captured','completed']),commentKeys:z.array(z.string().max(512)).max(500)}).optional(),
     targets:z.array(z.string().url().max(LIMITS.maxUrlChars)).max(5),sourceTabId:z.number().int().nonnegative(),
     phase:z.string().max(300),reason:z.string().max(500).nullable(),deadline:z.number(),direction:z.string().max(200),
   }).optional(),

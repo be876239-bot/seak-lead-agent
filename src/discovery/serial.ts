@@ -2,13 +2,15 @@ export type DiscoveryState = {
   status: 'running' | 'paused' | 'stopped' | 'completed';
   index: number; total: number; comments: number; currentComments: number;
   leads: number; currentLeads: number; phase: string; reason: string | null; deadline: number;
+  post?: {stage:'capturing'|'captured'|'completed'; commentKeys:string[]};
 };
 export type DiscoveryDeps = {
   navigate: (url: string, signal: AbortSignal) => Promise<void>;
   ready: (url: string, signal: AbortSignal) => Promise<void>;
   guard: () => Promise<void>;
   finish?: (signal:AbortSignal)=>Promise<void>;
-  process: (url: string, signal: AbortSignal, progress: (comments: number, leads: number, phase?: string) => void) => Promise<void>;
+  process: (url: string, signal: AbortSignal, progress: (comments: number, leads: number, phase?: string) => void,
+    checkpoint: {post:DiscoveryState['post']; captured:(keys:string[])=>Promise<void>; completed:()=>Promise<void>}) => Promise<void>;
   changed: (state: DiscoveryState) => Promise<void>;
   now: () => number;
 };
@@ -24,13 +26,13 @@ export class SerialDiscovery {
   async drained() { await this.pending; }
   constructor(urls: string[], private deps: DiscoveryDeps, restored?: DiscoveryState) {
     this.urls = [...new Set(urls)].slice(0,5);
-    this.state = {status:'paused',index:0,total:this.urls.length,comments:0,currentComments:0,leads:0,currentLeads:0,phase:'等待启动',reason:null,deadline:deps.now()+600000};
+    this.state = {status:'paused',index:0,total:this.urls.length,comments:0,currentComments:0,leads:0,currentLeads:0,phase:'等待启动',reason:null,deadline:deps.now()+600000,post:{stage:'capturing',commentKeys:[]}};
     if(restored) {Object.assign(this.state,restored,{status:'paused'});this.totals.set(restored.index,{comments:restored.currentComments,leads:restored.currentLeads});}
   }
   private publish() { const state = {...this.state}; this.writes = this.writes.then(()=>this.deps.changed(state)).catch(()=>{this.state.status='stopped';this.state.reason='本地存储异常，任务已停止';this.controller.abort();}); }
   pause(reason = '用户暂停；已保存结果保留') {
     if (this.state.status === 'completed' || this.state.status === 'stopped') return;
-    this.state.status='paused'; this.state.reason=reason; this.state.phase='任务已暂停'; this.controller.abort(); this.publish();
+    this.state.status='paused'; this.state.reason=reason; this.state.phase=this.state.post?.stage==='completed'?(this.state.index+1<this.urls.length?'当前帖子已完成，继续将处理下一篇':'最后一篇已完成，继续将完成任务收尾'):this.state.post?.stage==='captured'?'评论已保存，继续将完成本帖分析':'任务已暂停'; this.controller.abort(); this.publish();
   }
   stop(reason = '用户停止任务；已保存结果保留') {
     if(this.state.status==='completed'||this.state.status==='stopped') return;
@@ -62,25 +64,37 @@ export class SerialDiscovery {
     this.expiry=setTimeout(()=>this.stop('达到单任务10分钟时间上限'),Math.max(0,this.state.deadline-this.deps.now()));
     try {
       while(this.state.index<this.urls.length) {
+        if(this.state.post?.stage==='completed') {
+          this.live();this.state.index++;this.state.post={stage:'capturing',commentKeys:[]};
+          this.state.currentComments=0;this.state.currentLeads=0;this.state.phase='下一篇准备就绪';this.publish();await this.flush();this.live();
+          continue;
+        }
         this.live();await this.deps.guard();this.live();
         const url=this.urls[this.state.index]!;
-        this.state.currentComments=0;this.state.currentLeads=0;this.state.phase='正在打开笔记';this.publish();
+        const processingIndex=this.state.index;
+        this.state.phase='正在打开笔记';this.publish();
         await this.deps.navigate(url,signal);this.live();
         this.state.phase='等待页面正常加载';this.publish();await this.deps.ready(url,signal);this.live();
         await this.deps.guard();this.live();
+        const checkpoint=async(stage:'captured'|'completed',keys=this.state.post?.commentKeys??[])=>{
+          this.live();if(this.state.index!==processingIndex)throw new Error('帖子检查点已过期');
+          this.state.post={stage,commentKeys:[...keys]};this.publish();await this.flush();this.live();
+        };
         await this.deps.process(url,signal,(comments,leads,phase='正在加载评论……')=>{
-          if(signal.aborted)return;
+          if(signal.aborted || this.state.index!==processingIndex || this.state.post?.stage==='completed')return;
           const old=this.totals.get(this.state.index)??{comments:0,leads:0};
           this.state.comments+=Math.max(0,comments-old.comments);
           this.state.leads+=Math.max(0,leads-old.leads);
           this.totals.set(this.state.index,{comments:Math.max(comments,old.comments),leads:Math.max(leads,old.leads)});
-          this.state.currentComments=comments;this.state.currentLeads=leads;this.state.phase=phase;this.publish();
-        });
-        this.live();await this.deps.guard();this.live();
-        this.state.index++;
-        if(this.state.currentComments>=500) {this.state.reason='达到单帖500条安全上限，结束本次任务';break;}
+          this.state.currentComments=Math.max(comments,old.comments);this.state.currentLeads=Math.max(leads,old.leads);this.state.phase=phase;this.publish();
+        },{post:this.state.post,captured:keys=>checkpoint('captured',keys),completed:()=>checkpoint('completed')});
+        // Persist successful processing BEFORE any fallible page check or next navigation.
+        this.live();await checkpoint('completed');
+        if(this.state.currentComments>=500 && this.state.index+1<this.urls.length) {
+          this.pause('当前帖子已完成（500条安全上限），继续将处理下一篇');return;
+        }
       }
-      if(this.state.currentComments<500 && this.deps.finish){this.live();this.state.phase='正在返回搜索结果';this.publish();await this.deps.finish(signal);this.live();}
+      if(this.deps.finish){this.live();this.state.phase='正在返回搜索结果';this.publish();await this.deps.finish(signal);this.live();}
       this.state.status='completed';this.state.phase='本次任务已结束（不代表全部评论）';this.publish();
     } catch(e) { if(!signal.aborted)this.pause(e instanceof Error?e.message:'任务异常，需人工检查'); }
     finally {clearInterval(timer);if(this.state.status!=='paused' && this.expiry)clearTimeout(this.expiry);await this.flush();}

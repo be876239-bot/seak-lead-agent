@@ -10,17 +10,16 @@ import {MockProvider} from '../../src/ai/mock';
 import {runProfileGeneration,type RunnerDeps} from '../../src/analysis/runner';
 import {XhsSessionManager} from '../../src/xhs/session';
 import {RequestSchema,buildRequest,buildOk,buildError} from '../../src/messaging/protocol';
-import {handleBackgroundMessage} from '../../src/messaging/handlers';
 const shared=vi.hoisted(()=>({deps:null as unknown as RunnerDeps, tabs:{get:vi.fn(),create:vi.fn(),update:vi.fn(),goBack:vi.fn(),sendMessage:vi.fn()}}));
 vi.mock('wxt/browser',()=>({browser:{runtime:{id:'test',getURL:()=> 'chrome-extension://test/'},tabs:shared.tabs}}));
 vi.mock('../../src/analysis/jobs',()=>({get analysisRepos(){return shared.deps.repos;},makeDeps:async()=>shared.deps,baseJob:(_d:unknown,id:string)=>({id,kind:'comments',status:'created',ownerId:'test',generation:0,productId:null,profileVersion:null,tabId:null,noteKey:null,provider:'mock',modelId:'mock',promptVersion:'test',totalItems:0,completedItems:0,failedItems:0,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),errorCode:null})}));
 vi.mock('../../src/xhs/capture',async importOriginal=>{const actual=await importOriginal<typeof import('../../src/xhs/capture')>();return {...actual,captureNote:(id:number,options:import('../../src/xhs/capture').CaptureOptions)=>actual.captureNote(id,{...options,wait:async()=>{await Promise.resolve();}})};});
-const {registerDiscoveryHandlers}=await import('../../src/discovery/jobs');
 let db:SeekLeadDb;let manager:XhsSessionManager;
 afterEach(()=>{manager?.dispose();db?.close();});
 const ids=['a'.repeat(24),'b'.repeat(24)];
 function items(from:number,to:number){return Array.from({length:to-from+1},(_,i)=>`<div class="parent-comment"><div class="comment-item" id="comment-${from+i}"><div class="content"><span class="note-text">需要购买PPT工具${from+i}</span></div></div></div>`).join('');}
-it('production handlers → serial navigation → real incremental session → IndexedDB → existing AI runner; two notes remain isolated',async()=>{
+it.each(['normal','captured-live','completed-live','captured-restored','completed-restored'])('production handlers → serial navigation → incremental session → IndexedDB → AI; %s boundary recovery',async mode=>{
+ vi.resetModules();const {registerDiscoveryHandlers}=await import('../../src/discovery/jobs');const {handleBackgroundMessage}=await import('../../src/messaging/handlers');
  db=new SeekLeadDb('discovery-e2e-'+crypto.randomUUID());const repos=new Repositories(db);const lock=new TaskLockManager(repos);
  const provider=new MockProvider({profile:()=>({schemaVersion:1,name:{value:'合成产品',status:'inferred',evidence:[]},category:{value:null,status:'unknown',evidence:[]},summary:{value:null,status:'unknown',evidence:[]},capabilities:[],targetAudience:[],needsServed:[],exclusions:[],accessMethod:{value:null,status:'unknown',evidence:[]},price:{value:null,status:'unknown',evidence:[]},purchaseChannel:{value:null,status:'unknown',evidence:[]},searchSuggestions:['AI PPT']}),classification:input=>({results:input.items.map(c=>({commentId:c.commentId,relevance:'direct',need:'explicit',purchaseIntent:'explicit_buy',speakerRole:'seeker',intentTarget:'our_product',productFit:'supported',needSummary:'合成需求',evidence:[{sourceId:c.commentId+':text',quote:c.text}],reason:'合成测试',uncertainty:null}))})});
  shared.deps={repos,lock,provider,providerName:'mock',modelId:'mock',retryDelayMs:0};
@@ -31,13 +30,32 @@ it('production handlers → serial navigation → real incremental session → I
  function renderSearch(){manager?.dispose();currentUrl=source;history.replaceState({},'',source);document.body.innerHTML=[...ids].reverse().map(note=>`<section class="note-item"><a class="cover" href="/explore/${note}?source=current-${backs}">note</a></section>`).join('');
  document.querySelectorAll<HTMLAnchorElement>('a.cover').forEach(a=>a.onclick=e=>{e.preventDefault();clicked.push(a.getAttribute('href')!);renderNote(a.href);});manager=new XhsSessionManager(()=>document);}
  renderSearch();
+ let blocked=false,boundaryInjected=false;
+ const update=repos.updateJob.bind(repos);
+ vi.spyOn(repos,'updateJob').mockImplementation(async(id,patch)=>{
+  await update(id,patch);
+  if(!boundaryInjected && mode!=='normal' && patch.discovery?.post?.stage===mode.split('-')[0]){boundaryInjected=true;blocked=true;}
+ });
  shared.tabs.get.mockImplementation(async()=>({id:7,url:currentUrl,status:'complete'}));shared.tabs.goBack.mockImplementation(async()=>{backs++;renderSearch();});
  shared.tabs.create.mockImplementation(()=>{throw new Error('不允许创建标签');});shared.tabs.update.mockImplementation(()=>{throw new Error('不允许直接改URL');});
- shared.tabs.sendMessage.mockImplementation(async(_id,raw)=>{const req=RequestSchema.parse(raw);try{return buildOk(req.requestId,await manager.handle(req));}catch(e){return buildError(req.requestId,toErrorPayload(e));}});
+ shared.tabs.sendMessage.mockImplementation(async(_id,raw)=>{const req=RequestSchema.parse(raw);try{if(blocked&&req.type==='XHS_GUARD')throw new AppError('PAGE_BLOCKED','合成安全验证');return buildOk(req.requestId,await manager.handle(req));}catch(e){return buildError(req.requestId,toErrorPayload(e));}});
+ Object.values(shared.tabs).forEach(fn=>fn.mockClear());
  registerDiscoveryHandlers();const id=crypto.randomUUID();const sender={id:'test',url:'chrome-extension://test/sidepanel.html'};
  const classifySpy=vi.spyOn(provider,'classifyComments');
  const start=await handleBackgroundMessage(buildRequest('DISCOVERY_START',{jobId:id,productId:product.id,tabId:7,direction:'AI PPT'}),sender);expect(start.ok,start.error?.message).toBe(true);
  for(let n=0;n<300;n++){const job=await repos.getJob(id);if(job?.discovery?.status!=='running' && job?.status!=='collecting')break;await new Promise(r=>setTimeout(r,5));}
+ if(mode!=='normal') {
+  const paused=await repos.getJob(id);expect(paused?.discovery?.status).toBe('paused');expect(clicked).toHaveLength(1);
+  expect(()=>JobSchema.parse(paused)).not.toThrow();
+  const firstSessionCount=shared.tabs.sendMessage.mock.calls.filter(([,r])=>r.type==='XHS_START_SESSION').length;
+  expect(firstSessionCount).toBe(1);blocked=false;
+  let control=handleBackgroundMessage;
+  if(mode.endsWith('restored')){vi.resetModules();const restoredJobs=await import('../../src/discovery/jobs');control=(await import('../../src/messaging/handlers')).handleBackgroundMessage;restoredJobs.registerDiscoveryHandlers();}
+  const continued=await control(buildRequest('DISCOVERY_CONTROL',{jobId:id,action:'continue'}),sender);expect(continued.ok,continued.error?.message).toBe(true);
+  for(let n=0;n<300;n++){if((await repos.getJob(id))?.discovery?.status==='completed')break;await new Promise(r=>setTimeout(r,5));}
+  // One capture per note, including after a real JobSchema/IndexedDB/background restore.
+  expect(shared.tabs.sendMessage.mock.calls.filter(([,r])=>r.type==='XHS_START_SESSION')).toHaveLength(2);
+ }
  const job=await repos.getJob(id);expect(job?.discovery?.status,JSON.stringify(job?.discovery)).toBe('completed');expect(job?.discovery?.comments).toBe(80);expect(job?.discovery?.leads).toBe(80);
  expect(shared.tabs.create).not.toHaveBeenCalled();expect(shared.tabs.update).not.toHaveBeenCalled();expect(clicked).toHaveLength(2);expect(shared.tabs.goBack).toHaveBeenCalledTimes(2);
  for(const note of ids){const comments=await repos.commentsForNote('xhs:'+note);expect(comments).toHaveLength(40);expect(comments.every(c=>c.noteKey==='xhs:'+note)).toBe(true);}

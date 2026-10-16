@@ -58,12 +58,14 @@ export default function Discovery() {
       <b>{state.status==='running'?'SeekLead 正在寻找客户':state.status==='paused'?'任务已暂停':state.status==='completed'?'本次任务已结束':'任务已停止'}</b>
       <p>产品：{products.find(p=>p.id===job?.productId)?.profile.name.value??'—'}</p>
       <p>当前方向：{state.direction}</p>
-      <p>已完成帖子：{state.index} / {state.total}</p>
+      <p>已完成帖子：{job?.completedItems??state.index} / {state.total}</p>
       <p>当前帖子：第 {Math.min(state.index+1,state.total)} / {state.total}</p>
       <p>评论：累计已读取 {state.comments} 条（当前帖 {state.currentComments} 条）</p>
       {job?.collection && job.collection.discoveredCount===state.currentComments && <div><b>本帖评论采集</b><CollectionProgressView progress={job.collection}/></div>}
       <p>Lead：发现 {state.leads} 条（高意向或有需求，在线索页查看）</p>
       <p>状态：{state.phase}</p>{state.reason && <p>{state.reason}</p>}
+      {state.status==='paused' && state.post?.stage==='completed' && <p>{state.index+1<state.total?'当前帖子已完成，继续将处理下一篇。':'最后一篇已完成，继续将完成任务收尾。'}</p>}
+      {state.status==='paused' && state.post?.stage==='captured' && <p>本帖评论已保存，继续将完成分析，不重新采集。</p>}
       {job?.status==='interrupted'&&state.status==='running'&&<p>后台已中断，未自动恢复。请停止旧任务后重新启动；本地结果保留。</p>}
       <p>达到等待停止条件仅表示暂未发现新评论，不代表已采集全部评论；平台限制可能影响结果。</p>
       {active && <div style={{display:'flex',gap:8}}>

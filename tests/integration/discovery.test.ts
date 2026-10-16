@@ -34,9 +34,9 @@ describe('bounded serial discovery', () => {
     await task.run(); expect(task.state.status).toBe('paused'); expect(deps.navigate).not.toHaveBeenCalled();
     await task.run(); expect(guard).toHaveBeenCalledTimes(2); expect(deps.navigate).not.toHaveBeenCalled();
   });
-  it('500-comment guard prevents any further note navigation', async () => {
+  it('500-comment guard pauses at the completed post boundary until explicit continue', async () => {
     const {task,deps}=setup({process: async (_u,_s,p) => { p(500,1); }}); await task.run();
-    expect(task.state.status).toBe('completed'); expect(deps.navigate).toHaveBeenCalledTimes(1); expect(task.state.reason).toContain('500');
+    expect(task.state.status).toBe('paused'); expect(task.state.post?.stage).toBe('completed'); expect(deps.navigate).toHaveBeenCalledTimes(1); expect(task.state.reason).toContain('500');
   });
   it('wall-clock deadline stops without another navigation', async () => {
     let now=0; const {task,deps}=setup({now:()=>now,process:async()=>{now=600001;}}); await task.run();
