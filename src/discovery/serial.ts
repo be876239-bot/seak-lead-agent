@@ -7,6 +7,7 @@ export type DiscoveryDeps = {
   navigate: (url: string, signal: AbortSignal) => Promise<void>;
   ready: (url: string, signal: AbortSignal) => Promise<void>;
   guard: () => Promise<void>;
+  finish?: (signal:AbortSignal)=>Promise<void>;
   process: (url: string, signal: AbortSignal, progress: (comments: number, leads: number, phase?: string) => void) => Promise<void>;
   changed: (state: DiscoveryState) => Promise<void>;
   now: () => number;
@@ -79,6 +80,7 @@ export class SerialDiscovery {
         this.state.index++;
         if(this.state.currentComments>=500) {this.state.reason='达到单帖500条安全上限，结束本次任务';break;}
       }
+      if(this.state.currentComments<500 && this.deps.finish){this.live();this.state.phase='正在返回搜索结果';this.publish();await this.deps.finish(signal);this.live();}
       this.state.status='completed';this.state.phase='本次任务已结束（不代表全部评论）';this.publish();
     } catch(e) { if(!signal.aborted)this.pause(e instanceof Error?e.message:'任务异常，需人工检查'); }
     finally {clearInterval(timer);if(this.state.status!=='paused' && this.expiry)clearTimeout(this.expiry);await this.flush();}

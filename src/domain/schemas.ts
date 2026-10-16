@@ -144,6 +144,12 @@ export const LeadStateSchema = z.object({
 });
 export type LeadState = z.infer<typeof LeadStateSchema>;
 
+export const DiscoveryNavigationSchema=z.object({
+  mode:z.literal('dom-click-v1'),sourceUrl:z.string().url().max(LIMITS.maxUrlChars),
+  phase:z.enum(['search','opening','note','returning']),expectedNoteKey:z.string().max(256).nullable(),
+});
+export type DiscoveryNavigation=z.infer<typeof DiscoveryNavigationSchema>;
+
 export const JobKind = z.enum(['product', 'comments', 'discovery']);
 export const CaptureProgressSchema = z.object({
   discoveredCount: z.number().int().min(0).max(LIMITS.maxSessionComments),
@@ -181,6 +187,8 @@ export const JobSchema = z.object({
   discovery: z.object({
     status:z.enum(['running','paused','stopped','completed']),index:z.number().int().min(0).max(5),total:z.number().int().min(0).max(5),
     comments:z.number().int().nonnegative(),currentComments:z.number().int().min(0).max(500),leads:z.number().int().nonnegative(),currentLeads:z.number().int().nonnegative(),
+    navigation:DiscoveryNavigationSchema.optional(),
+    completedNoteKeys:z.array(z.string().max(256)).max(5).optional(),
     targets:z.array(z.string().url().max(LIMITS.maxUrlChars)).max(5),sourceTabId:z.number().int().nonnegative(),
     phase:z.string().max(300),reason:z.string().max(500).nullable(),deadline:z.number(),direction:z.string().max(200),
   }).optional(),

@@ -171,6 +171,12 @@ export class Repositories {
     return (await this.db.jobs.get(id)) ?? null;
   }
 
+  /** 仅原子更新导航子状态，不覆盖并发保存的暂停、计数和队列。 */
+  async updateDiscoveryNavigation(id:string,navigation:import('../domain/schemas').DiscoveryNavigation):Promise<void> {
+    const changed=await this.db.jobs.where('id').equals(id).modify(job=>{if(job.discovery)job.discovery.navigation={...navigation};});
+    if(!changed)throw new AppError('STORAGE_ERROR','任务导航状态保存失败');
+  }
+
   async updateJob(id: string, patch: Partial<Job>): Promise<void> {
     await this.db.jobs.update(id, { ...patch, updatedAt: nowIso() });
   }

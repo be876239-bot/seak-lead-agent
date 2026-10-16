@@ -95,3 +95,11 @@ it('search_result笔记路由与正常链接查询参数按原样保留，仅限
  const value='https://www.xiaohongshu.com/search_result/'+ 'a'.repeat(24)+'?source=synthetic';expect(noteUrl(value)).toBe(value);expect(noteKeyFromUrl(value)).toBe('xhs:'+'a'.repeat(24));
  expect(noteUrl('https://u:p@www.xiaohongshu.com/explore/'+ 'a'.repeat(24))).toBeNull();
 });
+
+it('返回搜索失败时保留已完成索引，手动继续只重试返回，不重新分析完成帖子',async()=>{
+ const finish=vi.fn(async()=>{if(finish.mock.calls.length===1)throw new Error('返回失败');});const {deps}=setup();const task=new SerialDiscovery(urls.slice(0,1),{...deps,finish});
+ await task.run();expect(task.state.status).toBe('paused');expect(task.state.index).toBe(1);await task.run();expect(task.state.status).toBe('completed');expect(deps.process).toHaveBeenCalledTimes(1);expect(finish).toHaveBeenCalledTimes(2);
+});
+it('500条后不再执行返回或其他导航，10分钟边界同样保护收尾动作',async()=>{
+ const finish=vi.fn(async()=>{});const {task}=setup({finish,process:async(_u,_s,p)=>{p(500,1);}});await task.run();expect(finish).not.toHaveBeenCalled();expect(task.state.reason).toContain('500');
+});

@@ -49,7 +49,7 @@ export default function Discovery() {
   };
   return <section>
     <h2 style={{fontSize:16}}>寻找客户</h2>
-    <p>先选择产品和搜索方向，在已登录的小红书网页中手动完成搜索并保留结果页，再开始任务。只处理当前已加载结果中的前 5 篇，不自动扩展搜索。</p>
+    <p>先选择产品和搜索方向，在已登录的小红书网页中手动完成搜索并保留结果页，再开始任务。只处理当前已加载结果中的前 5 篇，不自动扩展搜索。任务会在当前搜索标签内点击帖子并正常后退；运行时请勿手动切换该页。</p>
     <label>产品：<select value={productId} disabled={!!active} onChange={e=>setProductId(e.target.value)}>{products.map(p=><option key={p.id} value={p.id}>{p.profile.name.value??'未命名产品'}</option>)}</select></label>
     <p><label>当前方向：<select value={direction} disabled={!!active} onChange={e=>setDirection(e.target.value)}>{product?.profile.searchSuggestions.map(s=><option key={s}>{s}</option>)}</select></label></p>
     <p>请自行确认搜索结果与该方向相关。本次最多 5 篇、每篇 500 条、总计 10 分钟（含暂停），单页串行。评论与笔记将发送给已配置的 AI 服务分析，结果保存在本机。</p>
@@ -58,6 +58,7 @@ export default function Discovery() {
       <b>{state.status==='running'?'SeekLead 正在寻找客户':state.status==='paused'?'任务已暂停':state.status==='completed'?'本次任务已结束':'任务已停止'}</b>
       <p>产品：{products.find(p=>p.id===job?.productId)?.profile.name.value??'—'}</p>
       <p>当前方向：{state.direction}</p>
+      <p>已完成帖子：{state.index} / {state.total}</p>
       <p>当前帖子：第 {Math.min(state.index+1,state.total)} / {state.total}</p>
       <p>评论：累计已读取 {state.comments} 条（当前帖 {state.currentComments} 条）</p>
       {job?.collection && job.collection.discoveredCount===state.currentComments && <div><b>本帖评论采集</b><CollectionProgressView progress={job.collection}/></div>}

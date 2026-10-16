@@ -10,20 +10,21 @@ import { noteKeyFromUrl, noteUrl } from '../xhs/discovery-dom';
 import { SerialDiscovery } from './serial';
 import { DiscoveryBrowser, assertRunning } from './browser';
 
-let current: {id:string; task:SerialDiscovery} | null=null;
+let current: {id:string; task:SerialDiscovery;page:DiscoveryBrowser} | null=null;
 let starting=false;
-async function launch(spec:{jobId:string;productId:string;tabId:number;direction:string;urls:string[]},restored?:import('../domain/schemas').Job) {
-  const {jobId,productId,tabId,direction,urls}=spec;
+async function launch(spec:{jobId:string;productId:string;tabId:number;direction:string;urls:string[];sourceUrl:string},restored?:import('../domain/schemas').Job) {
+  const {jobId,productId,tabId,direction,urls,sourceUrl}=spec;
   const deps=await makeDeps();const product=await analysisRepos.getProduct(productId);
   if(!product || (restored && (product.profileVersion!==restored.profileVersion || deps.modelId!==restored.modelId || deps.providerName!==restored.provider)))throw new AppError('PAGE_CHANGED','产品画像或模型已变化，请启动新任务');
-  const page=new DiscoveryBrowser(tabId,restored?.tabId??null,restored?noteKeyFromUrl(urls[restored.discovery!.index]!):null);
+  if(restored&&!restored.discovery?.navigation)throw new AppError('PAGE_CHANGED','旧版直接URL任务不能自动转换历史，请停止旧任务并从搜索页启动新任务');
+  const page=new DiscoveryBrowser(tabId,restored?.discovery?.navigation??{mode:'dom-click-v1',sourceUrl,phase:'search',expectedNoteKey:null},state=>analysisRepos.updateDiscoveryNavigation(jobId,state));
 
   const task=new SerialDiscovery(urls,{
-    now:()=>Date.now(),navigate:(url,signal)=>page.navigate(url,signal),ready:(url,signal)=>page.ready(url,signal),guard:async()=>{const latest=await analysisRepos.getProduct(productId);if(!latest||latest.profileVersion!==product.profileVersion)throw new AppError('PAGE_CHANGED','产品画像变化，请重新启动任务');await page.guard();},
+    now:()=>Date.now(),navigate:(url,signal)=>page.navigate(url,signal),ready:(url,signal)=>page.ready(url,signal),finish:signal=>page.returnToSearch(signal),guard:async()=>{const latest=await analysisRepos.getProduct(productId);if(!latest||latest.profileVersion!==product.profileVersion)throw new AppError('PAGE_CHANGED','产品画像变化，请重新启动任务');await page.guard();},
     changed:async state=>{
       await analysisRepos.updateJob(jobId,{
         status:state.status==='running'?'collecting':state.status==='paused'?'interrupted':state.status==='stopped'?'cancelled':'completed',
-        tabId:page.tabId,completedItems:state.index,discovery:{...state,direction,targets:urls,sourceTabId:tabId},
+        tabId:page.tabId,completedItems:state.index,discovery:{...state,direction,targets:urls,sourceTabId:tabId,navigation:{...page.navigation},completedNoteKeys:urls.slice(0,state.index).map(noteKeyFromUrl)},
       });
     },
     process:async(url,signal,progress)=>{
@@ -62,8 +63,9 @@ async function launch(spec:{jobId:string;productId:string;tabId:number;direction
       }finally{acceptingProgress=false;}
     },
   },restored?.discovery);
-  if(!restored)await analysisRepos.createJob({...baseJob(deps,jobId),ownerId:crypto.randomUUID(),kind:'discovery',productId,profileVersion:product.profileVersion,status:'collecting',totalItems:urls.length,discovery:{...task.state,direction,targets:urls,sourceTabId:tabId}});
-  current={id:jobId,task};void task.run().catch(()=>task.stop('本地存储异常，任务已停止'));
+  if(!restored)await analysisRepos.createJob({...baseJob(deps,jobId),ownerId:crypto.randomUUID(),kind:'discovery',productId,profileVersion:product.profileVersion,status:'collecting',totalItems:urls.length,discovery:{...task.state,direction,targets:urls,sourceTabId:tabId,navigation:{...page.navigation},completedNoteKeys:[]}});
+  if(restored)await page.reconcile(urls[task.state.index]?noteKeyFromUrl(urls[task.state.index]!):undefined);
+  current={id:jobId,task,page};void task.run().catch(()=>task.stop('本地存储异常，任务已停止'));
 }
 export function registerDiscoveryHandlers() {
   registerSensitiveHandler('DISCOVERY_START',async req=>{
@@ -74,9 +76,9 @@ export function registerDiscoveryHandlers() {
       const {jobId,productId,tabId,direction}=req.payload;
       const product=await analysisRepos.getProduct(productId);
       if(!product || !product.profile.searchSuggestions.includes(direction))throw new AppError('PAGE_CHANGED','请选择当前产品画像中的搜索方向');
-      const response=z.object({urls:z.array(z.string().max(2048)).min(1).max(5)}).parse(await ask(tabId,buildRequest('XHS_DISCOVER',{})));
+      const response=z.object({sourceUrl:z.string().url().max(2048),urls:z.array(z.string().max(2048)).min(1).max(5)}).parse(await ask(tabId,buildRequest('XHS_DISCOVER',{})));
       if(response.urls.some(url=>!noteUrl(url)))throw new AppError('URL_INVALID','搜索结果含不支持的链接');
-      await launch({jobId,productId,tabId,direction,urls:response.urls});
+      await launch({jobId,productId,tabId,direction,urls:response.urls,sourceUrl:response.sourceUrl});
       return {jobId};
     }finally{starting=false;}
   });
@@ -98,12 +100,12 @@ export function registerDiscoveryHandlers() {
       if(req.payload.action==='stop') {await analysisRepos.updateJob(saved.id,{status:'cancelled',discovery:{...saved.discovery,status:'stopped',reason:'用户停止任务',phase:'任务已停止'}});return {jobId:saved.id};}
       if(req.payload.action!=='continue')return {jobId:saved.id};
       if(saved.discovery.deadline<=Date.now() || ['completed','cancelled'].includes(saved.status))throw new AppError('CANCELLED','任务已结束或达到10分钟上限，请重新启动');
-      await launch({jobId:saved.id,productId:saved.productId,tabId:saved.discovery.sourceTabId,direction:saved.discovery.direction,urls:saved.discovery.targets},saved);
+      await launch({jobId:saved.id,productId:saved.productId,tabId:saved.discovery.sourceTabId,direction:saved.discovery.direction,urls:saved.discovery.targets,sourceUrl:saved.discovery.navigation?.sourceUrl??'https://www.xiaohongshu.com/search_result'},saved);
       return {jobId:saved.id};
     }
     if(req.payload.action==='stop')current.task.stop();
     else if(req.payload.action==='pause')current.task.pause();
-    else {await current.task.drained();void current.task.run().catch(()=>current?.task.stop('本地存储异常'));}
+    else {await current.task.drained();await current.page.reconcile(current.task.urls[current.task.state.index]?noteKeyFromUrl(current.task.urls[current.task.state.index]!):undefined);void current.task.run().catch(()=>current?.task.stop('本地存储异常'));}
     await current.task.flush();return {jobId:current.id};
     }finally{starting=false;}
   });

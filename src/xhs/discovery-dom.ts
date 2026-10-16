@@ -1,6 +1,6 @@
 import { AppError } from '../domain/errors';
 
-function visible(el: Element): boolean {
+export function visible(el: Element): boolean {
   for(let node: Element | null=el;node;node=node.parentElement) {
     const style=node.ownerDocument.defaultView?.getComputedStyle(node);
     if(node.hasAttribute('hidden') || node.getAttribute('aria-hidden')==='true' || style?.display==='none' || style?.visibility==='hidden') return false;
@@ -10,6 +10,9 @@ function visible(el: Element): boolean {
 /** 只检查可见的页面级提示，避免把评论正文中的“验证码”误判为平台验证。 */
 export function platformBlock(doc: Document): string | null {
   if([...doc.querySelectorAll('.login-container')].some(visible)) return '平台限制：登录已失效或需要登录，请手动处理';
+  // 用户实际报告的页面级错误文案；避开正文/评论，既有DOM仍在也必须暂停。
+  const errors=[...doc.querySelectorAll('body *')].filter(el=>!el.children.length && !el.closest('#detail-title,#detail-desc,.comments-el,section.note-item,script,style,noscript') && visible(el));
+  if(errors.some(el=>/当前笔记暂时无法浏览|笔记暂时无法(?:浏览|查看)|请打开小红书\s*App\s*扫码查看|非法消息|你访问的页面不见了|笔记不存在/i.test(el.textContent??'')))return '平台限制或页面异常：当前笔记无法浏览、扫码查看或非法消息，请人工检查；任务已暂停';
   const indicators=doc.querySelectorAll('[role="dialog"], [role="alert"], iframe[title], iframe[src*="captcha"], [id*="captcha"], [class*="captcha"], [class*="verify"], [class*="security"], .error-page, .error-container');
   for(const el of indicators) {
     if(!visible(el))continue;
@@ -42,7 +45,7 @@ export function readSearchNotes(doc: Document, location: string): string[] {
   const url=new URL(location);
   const block=platformBlock(doc);if(block)throw new AppError('PAGE_BLOCKED',block);
   if(url.origin!=='https://www.xiaohongshu.com'||url.pathname!=='/search_result') throw new AppError('PAGE_UNSUPPORTED','请先在小红书正常搜索并保留搜索结果页');
-  if(doc.querySelector('#noteContainer')) throw new AppError('PAGE_UNSUPPORTED','请先关闭笔记详情，回到搜索结果页');
+  if([...doc.querySelectorAll('#noteContainer')].some(visible)) throw new AppError('PAGE_UNSUPPORTED','请先关闭笔记详情，回到搜索结果页');
   const seen=new Set<string>();const found:string[]=[];
   for(const a of doc.querySelectorAll('section.note-item a[href]')) {
     const href=noteUrl(a.getAttribute('href')??'',url.origin);if(!href)continue;

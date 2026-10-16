@@ -1,54 +1,38 @@
-import {afterEach, beforeEach, expect, it, vi} from 'vitest';
-import {buildError,buildOk} from '../../src/messaging/protocol';
-import {AppError,toErrorPayload} from '../../src/domain/errors';
-const api=vi.hoisted(()=>({get:vi.fn(),create:vi.fn(),update:vi.fn(),sendMessage:vi.fn()}));
+import{afterEach,beforeEach,expect,it,vi}from'vitest';
+import{buildError,buildOk}from'../../src/messaging/protocol';
+import{AppError,toErrorPayload}from'../../src/domain/errors';
+import type{DiscoveryNavigation}from'../../src/domain/schemas';
+const api=vi.hoisted(()=>({get:vi.fn(),create:vi.fn(),update:vi.fn(),goBack:vi.fn(),sendMessage:vi.fn()}));
 vi.mock('wxt/browser',()=>({browser:{tabs:api}}));
-const {DiscoveryBrowser}=await import('../../src/discovery/browser');
-const url='https://www.xiaohongshu.com/explore/'+ 'a'.repeat(24);
-beforeEach(()=>{
-  vi.useFakeTimers();Object.values(api).forEach(fn=>fn.mockReset());
-  api.create.mockResolvedValue({id:8});api.update.mockResolvedValue({id:8});api.get.mockResolvedValue({id:8,url,status:'complete'});
-  api.sendMessage.mockImplementation(async(_id,req)=>buildOk(req.requestId,req.type==='XHS_GET_STATUS'?{noteKey:'xhs:'+'a'.repeat(24),parserVersion:'test',supported:true,blocked:false}:{ok:true}));
+const{DiscoveryBrowser}=await import('../../src/discovery/browser');
+const source='https://www.xiaohongshu.com/search_result?keyword=AI';const url='https://www.xiaohongshu.com/explore/'+'a'.repeat(24);const other=url.replace(/a{24}/,'b'.repeat(24));
+let current:string;let blocked=false;
+const initial=():DiscoveryNavigation=>({mode:'dom-click-v1',sourceUrl:source,phase:'search',expectedNoteKey:null});
+const page=()=>new DiscoveryBrowser(7,initial());
+const clicks=()=>api.sendMessage.mock.calls.filter(([,r])=>r.type==='XHS_CLICK_NOTE');
+beforeEach(()=>{vi.useFakeTimers();Object.values(api).forEach(fn=>fn.mockReset());current=source;blocked=false;
+ api.get.mockImplementation(async()=>({id:7,url:current,status:'complete'}));api.goBack.mockImplementation(async()=>{current=source;});
+ api.sendMessage.mockImplementation(async(_id,req)=>{
+  if(blocked)return buildError(req.requestId,toErrorPayload(new AppError('PAGE_BLOCKED','平台限制：安全验证或扫码')));
+  if(req.type==='XHS_CLICK_NOTE'){current=req.payload.expectedNoteKey.endsWith('b'.repeat(24))?other:url;return buildOk(req.requestId,{clicked:true,noteKey:req.payload.expectedNoteKey});}
+  if(req.type==='XHS_SEARCH_STATE')return buildOk(req.requestId,{sourceUrl:current,isSearch:current===source,hasNote:current!==source});
+  if(req.type==='XHS_GET_STATUS')return buildOk(req.requestId,{noteKey:'xhs:'+new URL(current).pathname.split('/').at(-1),parserVersion:'test',supported:true,blocked:false});
+  return buildOk(req.requestId,{ok:true});
+ });
 });
 afterEach(()=>vi.useRealTimers());
-it('uses a single task tab for all navigation, never social write APIs',async()=>{
- const page=new DiscoveryBrowser(7);const signal=new AbortController().signal;
- await page.navigate(url,signal);await page.ready(url,signal);await page.navigate(url,signal);await page.ready(url,signal);
- expect(api.create).toHaveBeenCalledTimes(1);expect(api.create).toHaveBeenCalledWith({url:'about:blank',active:true});
- expect(api.update).toHaveBeenCalledTimes(2);expect(api.sendMessage.mock.calls.every(([,r])=>['XHS_GUARD','XHS_GET_STATUS'].includes(r.type))).toBe(true);
-});
-it('cancellation while creating tab does not navigate after the pending API resolves',async()=>{
- const ac=new AbortController();api.create.mockImplementation(async()=>{ac.abort();return{id:8};});
- const page=new DiscoveryBrowser(7);await expect(page.navigate(url,ac.signal)).rejects.toMatchObject({code:'CANCELLED'});expect(api.update).not.toHaveBeenCalled();
-});
-it('waits for complete loading before checking note status',async()=>{
- api.get.mockResolvedValueOnce({url,status:'loading'});const page=new DiscoveryBrowser(7);const signal=new AbortController().signal;await page.navigate(url,signal);
- const pending=page.ready(url,signal);await Promise.resolve();expect(api.sendMessage).not.toHaveBeenCalled();await vi.advanceTimersByTimeAsync(1000);await pending;
- expect(api.sendMessage).toHaveBeenCalled();
-});
-it('CAPTCHA interrupts immediately without more navigation or refresh',async()=>{
- api.sendMessage.mockImplementation(async(_id,req)=>buildError(req.requestId,toErrorPayload(new AppError('PAGE_BLOCKED','平台限制：安全验证'))));
- const page=new DiscoveryBrowser(7);const signal=new AbortController().signal;await page.navigate(url,signal);
- await expect(page.ready(url,signal)).rejects.toMatchObject({code:'PAGE_BLOCKED'});expect(api.sendMessage).toHaveBeenCalledTimes(1);expect(api.update).toHaveBeenCalledTimes(1);
-});
-it('login redirection is reported as platform restriction first',async()=>{
- api.get.mockResolvedValue({url:'https://www.xiaohongshu.com/login',status:'complete'});
- api.sendMessage.mockImplementation(async(_id,req)=>buildError(req.requestId,toErrorPayload(new AppError('PAGE_BLOCKED','请登录'))));
- const page=new DiscoveryBrowser(7);const signal=new AbortController().signal;await page.navigate(url,signal);await expect(page.ready(url,signal)).rejects.toMatchObject({code:'PAGE_BLOCKED'});
-});
-it('three successive script readiness failures stop, never refresh or infinite retry',async()=>{
- api.sendMessage.mockRejectedValue(new Error('no content script'));const page=new DiscoveryBrowser(7);const signal=new AbortController().signal;await page.navigate(url,signal);
- const pending=expect(page.ready(url,signal)).rejects.toMatchObject({code:'PARSE_FAILED'});await vi.advanceTimersByTimeAsync(3000);await pending;expect(api.sendMessage).toHaveBeenCalledTimes(3);expect(api.update).toHaveBeenCalledTimes(1);
-});
-it('loading has a finite 30 second budget',async()=>{
- api.get.mockResolvedValue({url,status:'loading'});const page=new DiscoveryBrowser(7);const signal=new AbortController().signal;await page.navigate(url,signal);
- const pending=expect(page.ready(url,signal)).rejects.toMatchObject({code:'PAGE_UNREACHABLE'});await vi.advanceTimersByTimeAsync(30000);await pending;expect(api.get).toHaveBeenCalledTimes(30);
-});
-it('manual navigation to another note pauses before capture',async()=>{
- api.get.mockResolvedValue({url:url.replace(/a{24}/,'b'.repeat(24)),status:'complete'});const page=new DiscoveryBrowser(7);const signal=new AbortController().signal;await page.navigate(url,signal);
- await expect(page.ready(url,signal)).rejects.toMatchObject({code:'PAGE_CHANGED'});
-});
-it('closed tab or missing browser permission is an explicit error',async()=>{
- api.get.mockRejectedValue(new Error('No tab'));const page=new DiscoveryBrowser(7);await expect(page.guard()).rejects.toThrow('No tab');
- api.get.mockResolvedValue({status:'complete'});await expect(page.guard()).rejects.toMatchObject({code:'PAGE_CHANGED'});
-});
+it('normal card click → note A → browser Back → current card B; no create/update URL or social writes',async()=>{const p=page(),s=new AbortController().signal;await p.navigate(url,s);await p.ready(url,s);await p.navigate(other,s);await p.ready(other,s);await p.returnToSearch(s);expect(clicks()).toHaveLength(2);expect(api.goBack).toHaveBeenCalledTimes(2);expect(api.create).not.toHaveBeenCalled();expect(api.update).not.toHaveBeenCalled();expect(p.tabId).toBe(7);expect(p.navigation.phase).toBe('search');});
+it('cancellation during persisted opening phase prevents any subsequent click',async()=>{const ac=new AbortController();const p=new DiscoveryBrowser(7,initial(),async state=>{if(state.phase==='opening')ac.abort();});await expect(p.navigate(url,ac.signal)).rejects.toMatchObject({code:'CANCELLED'});expect(clicks()).toHaveLength(0);});
+it('waits for complete loading before checking note status',async()=>{const p=page(),s=new AbortController().signal;await p.navigate(url,s);api.sendMessage.mockClear();api.get.mockResolvedValueOnce({url,status:'loading'});const pending=p.ready(url,s);await Promise.resolve();expect(api.sendMessage).not.toHaveBeenCalled();await vi.advanceTimersByTimeAsync(1000);await pending;expect(p.navigation.phase).toBe('note');});
+it.each(['CAPTCHA','登录失效','当前笔记暂时无法浏览，打开App扫码'])('%s pauses without Back, repeat clicks or URL fallback',async()=>{const p=page(),s=new AbortController().signal;await p.navigate(url,s);blocked=true;await expect(p.ready(url,s)).rejects.toMatchObject({code:'PAGE_BLOCKED'});expect(clicks()).toHaveLength(1);expect(api.goBack).not.toHaveBeenCalled();expect(api.update).not.toHaveBeenCalled();});
+it('three successive script failures stop without refresh or re-click',async()=>{const p=page(),s=new AbortController().signal;await p.navigate(url,s);api.sendMessage.mockRejectedValue(new Error('no content script'));const pending=expect(p.ready(url,s)).rejects.toMatchObject({code:'PARSE_FAILED'});await vi.advanceTimersByTimeAsync(3000);await pending;expect(api.sendMessage.mock.calls.filter(([,r])=>r.type==='XHS_CLICK_NOTE')).toHaveLength(1);});
+it('click that fails to navigate has a finite 30 second budget and only one action',async()=>{api.sendMessage.mockImplementation(async(_id,req)=>buildOk(req.requestId,req.type==='XHS_CLICK_NOTE'?{clicked:true,noteKey:'xhs:'+'a'.repeat(24)}:req.type==='XHS_SEARCH_STATE'?{sourceUrl:source,isSearch:true,hasNote:false}:{ok:true}));const p=page(),s=new AbortController().signal;await p.navigate(url,s);const pending=expect(p.ready(url,s)).rejects.toMatchObject({code:'PAGE_UNREACHABLE'});await vi.advanceTimersByTimeAsync(30000);await pending;expect(clicks()).toHaveLength(1);expect(api.get.mock.calls.length).toBeLessThanOrEqual(32);});
+it('manual navigation to another note pauses before capture',async()=>{const p=page(),s=new AbortController().signal;await p.navigate(url,s);current=other;await expect(p.ready(url,s)).rejects.toMatchObject({code:'PAGE_CHANGED'});});
+it('wrong history destination pauses without next card click',async()=>{const p=page(),s=new AbortController().signal;await p.navigate(url,s);await p.ready(url,s);api.goBack.mockImplementation(async()=>{current='https://www.xiaohongshu.com/search_result?keyword=other';});await expect(p.navigate(other,s)).rejects.toMatchObject({code:'PAGE_CHANGED'});expect(clicks()).toHaveLength(1);expect(api.goBack).toHaveBeenCalledTimes(1);});
+it('explicit resume on current target reuses note instead of re-clicking or refreshing',async()=>{current=url;const p=new DiscoveryBrowser(7,{...initial(),phase:'opening',expectedNoteKey:'xhs:'+'a'.repeat(24)});await p.reconcile();await p.navigate(url,new AbortController().signal);expect(clicks()).toHaveLength(0);expect(api.goBack).not.toHaveBeenCalled();});
+it('explicit resume after browser Back recognizes original search context',async()=>{const p=new DiscoveryBrowser(7,{...initial(),phase:'returning',expectedNoteKey:'xhs:'+'a'.repeat(24)});await p.reconcile();expect(p.navigation.phase).toBe('search');await p.navigate(other,new AbortController().signal);expect(clicks()[0]?.[1].payload.expectedNoteKey).toBe('xhs:'+'b'.repeat(24));});
+it('document unload closing response port is accepted only if exact target was reached, never re-clicked',async()=>{const original=api.sendMessage.getMockImplementation()!;api.sendMessage.mockImplementation(async(id,req)=>{if(req.type==='XHS_CLICK_NOTE'){current=url;throw new Error('port closed after normal navigation');}return original(id,req);});const p=page(),s=new AbortController().signal;await p.navigate(url,s);await p.ready(url,s);expect(clicks()).toHaveLength(1);});
+it('cancel while Back is pending cannot click next note when it resolves late',async()=>{const p=page(),ac=new AbortController();await p.navigate(url,ac.signal);await p.ready(url,ac.signal);let release!:()=>void;api.goBack.mockImplementation(()=>new Promise<void>(resolve=>{release=resolve;}));const pending=expect(p.navigate(other,ac.signal)).rejects.toMatchObject({code:'CANCELLED'});await vi.advanceTimersByTimeAsync(0);ac.abort();release();await pending;expect(clicks()).toHaveLength(1);});
+it('closed tab or missing permission is a clear error',async()=>{api.get.mockRejectedValue(new Error('No tab'));await expect(page().guard()).rejects.toThrow('No tab');api.get.mockResolvedValue({status:'complete'});await expect(page().guard()).rejects.toMatchObject({code:'PAGE_CHANGED'});});
+
+it('platform guard remains active while a normal click is awaiting page readiness',async()=>{const p=page(),s=new AbortController().signal;await p.navigate(url,s);blocked=true;await expect(p.guard()).rejects.toMatchObject({code:'PAGE_BLOCKED'});expect(clicks()).toHaveLength(1);});

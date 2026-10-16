@@ -6,6 +6,7 @@ import { LIMITS } from '../domain/limits';
 export const PROTOCOL_VERSION = 1;
 
 export const MessageType = z.enum([
+  'XHS_CLICK_NOTE', 'XHS_SEARCH_STATE',
   'XHS_DISCOVER', 'XHS_GUARD', 'DISCOVERY_START', 'DISCOVERY_CONTROL',
   'XHS_GET_STATUS',
   'XHS_START_SESSION',
@@ -24,6 +25,8 @@ export type MessageType = z.infer<typeof MessageType>;
 const RequestId = z.string().min(1).max(64);
 
 export const RequestSchema = z.discriminatedUnion('type', [
+  z.object({protocol:z.literal(PROTOCOL_VERSION),requestId:RequestId,type:z.literal('XHS_SEARCH_STATE'),payload:z.object({})}),
+  z.object({protocol:z.literal(PROTOCOL_VERSION),requestId:RequestId,type:z.literal('XHS_CLICK_NOTE'),payload:z.object({expectedSearchUrl:z.string().url().max(LIMITS.maxUrlChars),expectedNoteKey:z.string().regex(/^xhs:[0-9a-z]{24}$/)})}),
   z.object({ protocol:z.literal(PROTOCOL_VERSION), requestId:RequestId, type:z.literal('XHS_DISCOVER'), payload:z.object({}) }),
   z.object({ protocol:z.literal(PROTOCOL_VERSION), requestId:RequestId, type:z.literal('XHS_GUARD'), payload:z.object({}) }),
   z.object({protocol:z.literal(PROTOCOL_VERSION),requestId:RequestId,type:z.literal('DISCOVERY_START'),payload:z.object({jobId:z.string().uuid(),productId:z.string().uuid(),tabId:z.number().int().nonnegative(),direction:z.string().min(1).max(200)})}),

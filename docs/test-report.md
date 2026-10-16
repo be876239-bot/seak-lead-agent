@@ -1,6 +1,6 @@
 # 觅客Agent 测试报告（T28 自动化回归 + T31 静态审查）
 
-**最新结果见第 7 节：24 文件 / 235 项通过。第 1–6 节为历史阶段记录，不代表本轮真实小红书验收通过。**
+**最新结果见第 10 节：30 文件 / 310 项通过。前面各节为历史阶段记录，不能替代真实小红书验收。**
 
 日期：2026-10-16（UTC+8 夜间执行）。执行者：Qoder agent；命令均在项目根目录真实运行，输出原样摘录。
 
@@ -136,3 +136,7 @@ Edge/Chrome ZIP各358190 B、11项，SHA256 d7e875db7e5937ffd87eda7b22a764c5fdb8
 最终29文件/289项通过，比基线新增16项：xhs-replies 12项、父评论补查2项、分类计数与Lead上下文各1项。typecheck/lint通过。Edge/Chrome ZIP各360072 B、11项，SHA256 a94ec0cb678ce91b9fc172122f46116ed04860e4fda14fa95e2f6b1865b0ed94；逐项与构建一致，无测试/环境文件，Key模式扫描0命中，manifest权限不变。AI Prompt、分组、AI payload、runner和数据库表版本未改，无迁移。
 
 真实小红书NOT VERIFIED：Edge绑定返回Debugger unattached，未执行真实展开/采集；用户明确选择先交付代码与验收步骤。仅合成UI组件渲染并截图，不算真实平台通过。完整审计、A–K映射、操作白名单、数据模型、真实验收步骤与限制见 `replies-capture-2026-10-16.md`。
+
+## 10. 2026-10-16 正常交互切帖（最新，D012）
+
+基线34e2c38；npm test：30文件310项全部通过，typecheck/lint/build与Edge打包通过。真实DOM链接click、原搜索标签Back、导航状态持久化及异常暂停已实现。合成IAB两篇82条（含2回复）保存、首屏移除仍保留、2次点击/2次Back；MockAI不代表质量。Edge断开且用户暂无法连接，真实小红书NOT VERIFIED，风控触发未判定。包哈希、修改文件、测试和验收步骤见 normal-navigation-2026-10-16.md。
