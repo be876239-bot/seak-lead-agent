@@ -79,8 +79,9 @@ function parseItem(el: Element, noteKey: string, isSub: boolean, parentElementId
   const authorA = el.querySelector(SEL.authorLink);
   const name = (authorA?.textContent || '').trim();
   const href = authorA?.getAttribute('href') || null;
-  const profileUrl = href && /^\/user\/profile\//.test(href) ? href : null;
-  const authorLocalKey = profileUrl ? profileUrl.split('/').filter(Boolean).pop() ?? null : null;
+  const path = href ? /^\/user\/profile\/[^/?#]+/.exec(href)?.[0] ?? null : null;
+  const profileUrl = path ? `https://www.xiaohongshu.com${path}` : null;
+  const authorLocalKey = path ? path.split('/').pop() ?? null : null;
   let text = (el.querySelector(SEL.content)?.textContent || '').trim();
   const truncated = text.length > LIMITS.maxCommentChars;
   text = text.slice(0, LIMITS.maxCommentChars);

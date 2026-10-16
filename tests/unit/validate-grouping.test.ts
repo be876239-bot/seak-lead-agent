@@ -33,8 +33,8 @@ function results(extra: unknown[] = [], mutate?: (d: Decision) => Decision) {
 }
 
 describe('validateClassificationOutput', () => {
-  it('RULE_VERSION 为 group-v1', () => {
-    expect(RULE_VERSION).toBe('group-v1');
+  it('RULE_VERSION 为 group-v2', () => {
+    expect(RULE_VERSION).toBe('group-v2');
   });
   it('合法输出通过；父评论证据不算自身证据', () => {
     const out = validateClassificationOutput(results(), input());
@@ -134,7 +134,7 @@ describe('validateProfileOutput', () => {
   });
 });
 
-describe('groupDecision（group-v1 有序规则）', () => {
+describe('groupDecision（group-v2 有序规则，2026-10-16 用户指示降门槛）', () => {
   const d = (over: Partial<Decision> = {}): Decision => ({ ...base, commentId: 'c001', ...over });
   it('卖家、无关、不适配、无需求优先排除', () => {
     expect(groupDecision(d({ speakerRole: 'seller' }), true)).toBe('excluded');
@@ -142,16 +142,20 @@ describe('groupDecision（group-v1 有序规则）', () => {
     expect(groupDecision(d({ productFit: 'unsupported' }), true)).toBe('excluded');
     expect(groupDecision(d({ need: 'none' }), true)).toBe('excluded');
   });
-  it('不确定与相邻领域进 review', () => {
-    expect(groupDecision(d({ relevance: 'adjacent' }), true)).toBe('review');
+  it('模型标记不确定与判不了的字段进 review', () => {
     expect(groupDecision(d({ uncertainty: '可能指别的考试' }), true)).toBe('review');
     expect(groupDecision(d({ productFit: 'unknown' }), true)).toBe('review');
+    expect(groupDecision(d({ need: 'unknown' }), true)).toBe('review');
+    expect(groupDecision(d({ relevance: 'unknown' }), true)).toBe('review');
   });
-  it('问价且上下文匹配、有自身证据 → high_intent', () => {
+  it('问价且上下文匹配 → high_intent', () => {
     expect(groupDecision(d(), true)).toBe('high_intent');
   });
-  it('缺当前评论证据不得 high_intent', () => {
-    expect(groupDecision(d(), false)).toBe('need');
+  it('v2 高意向不再要求当前评论自身证据', () => {
+    expect(groupDecision(d(), false)).toBe('high_intent');
+  });
+  it('相邻领域可支持有需求 → need（v2 不再压 review）', () => {
+    expect(groupDecision(d({ relevance: 'adjacent' }), true)).toBe('need');
   });
   it('free_only 禁止高意向', () => {
     expect(groupDecision(d({ purchaseIntent: 'free_only' }), true)).toBe('need');
@@ -159,8 +163,8 @@ describe('groupDecision（group-v1 有序规则）', () => {
   it('角色不确定不判高意向', () => {
     expect(groupDecision(d({ speakerRole: 'unknown' }), true)).toBe('need');
   });
-  it('求资料（solution_seeking）进入 need', () => {
-    expect(groupDecision(d({ purchaseIntent: 'solution_seeking' }), true)).toBe('need');
+  it('求资料（solution_seeking）+直接相关+需求方 → high_intent（v2 纳入付费信号）', () => {
+    expect(groupDecision(d({ purchaseIntent: 'solution_seeking' }), true)).toBe('high_intent');
   });
   it('竞品信号可高意向但需徽章，不得声称想买本产品', () => {
     const comp = d({ intentTarget: 'competitor', purchaseIntent: 'explicit_buy' });
@@ -168,7 +172,7 @@ describe('groupDecision（group-v1 有序规则）', () => {
     expect(needsTargetBadge(comp)).toBe('competitor');
     expect(needsTargetBadge(d())).toBe('category');
   });
-  it('sharer 不高意向，按规则 4 归 need（非排除）', () => {
+  it('sharer 不高意向，按规则归 need（非排除）', () => {
     expect(groupDecision(d({ speakerRole: 'sharer', purchaseIntent: 'none', need: 'implicit' }), true)).toBe('need');
   });
   it('分组枚举完整', () => {

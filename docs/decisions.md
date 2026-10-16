@@ -21,3 +21,11 @@
 
 ## D006 2026-10-16 昵称保留原文不打码（用户指示）
 - 用户明确要求导出与界面显示网友昵称原文（"脱敏昵称不要脱敏啊"）。session.ts 昵称仅做空白规整、不再 redactText；昵称/主页/属地仍绝不进入 AI DTO（白名单不变）。风险口径随 DEVELOPMENT.md 第 9 节修订：导出文件含原始昵称，数据由用户本地自担。旧库中已打码的昵称会在同笔记重新采集时覆盖为原文。
+
+## D007 2026-10-16 分组规则降门槛 group-v2＋缓存与规则版本解耦（用户指示）
+- 用户反馈“高意向/有需求分类不准、门槛太死”，指示降门槛并同意免费重算旧结果。
+- group-v2：取消“高意向必须有当前评论自身证据”；solution_seeking 计入付费信号；adjacent/非需求方身份/free_only 由 review 放宽到 need；uncertainty 与判不了的字段仍进 review。RULE_VERSION=group-v2。
+- 计费保护：缓存键组成固定使用 CACHE_RULE_VERSION=group-v1（分组规则不影响模型判断结果），Analysis 行仍记录真实 ruleVersion；规则升级不再触发付费缓存失效。
+- 免费重算：buildLeadGroups 对 ruleVersion≠当前版本的行按当前规则重判展示分组，人工纠正优先；旧结果打开即新分组，零费用。
+- 意向展示并为三档中文（意向本产品/意向该品类/无意向），intentTarget 存储与导出协议枚举不变；竞品徽章“并非本产品”保留。
+- 同批修复小红书用户 ID 抓取：作者主页 href 剥离 `?xsec_token` 等查询参数后取路径段作 authorLocalKey，profileUrl 转为绝对 URL（相对链接此前无法通过 safeExternalUrl 渲染）。旧库数据需重新采集该笔记后刷新。

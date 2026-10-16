@@ -6,7 +6,7 @@ import { toErrorPayload } from '../../src/domain/errors';
 import { getNoteStatus } from '../../src/xhs/capture';
 import type { XhsStatusPayload } from '../../src/messaging/protocol';
 import {
-  buildLeadGroups, GROUP_ORDER, GROUP_TITLES, INTENT_TARGET_CN, isJobActive, isRetryableJob,
+  buildLeadGroups, GROUP_ORDER, GROUP_TITLES, intentShortCn, isJobActive, isRetryableJob,
   jobPhaseLabel, safeExternalUrl,
   type LeadView,
 } from '../../src/ui/logic';
@@ -37,11 +37,9 @@ function ItemCard({ view, product, onToggleHandled }: {
       <div style={{ color: '#444' }}>{view.comment.text}</div>
       <div style={{ marginTop: 4 }}>
         <b>{view.analysis.decision.needSummary}</b>
-        <span style={{ color: '#777', marginLeft: 6 }}>意向对象：{INTENT_TARGET_CN[view.analysis.decision.intentTarget]}</span>
-        {badge && (
-          <span style={{ color: '#b60', marginLeft: 6 }}>
-            （{badge === 'competitor' ? '指向竞品，并非本产品' : '指向品类，未指名产品'}）
-          </span>
+        <span style={{ color: '#777', marginLeft: 6 }}>意向：{intentShortCn(view.analysis.decision)}</span>
+        {badge === 'competitor' && (
+          <span style={{ color: '#b60', marginLeft: 6 }}>（指向竞品，并非本产品）</span>
         )}
       </div>
       {view.analysis.decision.evidence.length > 0 && (
@@ -258,12 +256,13 @@ export default function CurrentNote() {
 
       {groups && (
         <details style={{ fontSize: 11, color: '#666' }}>
-          <summary>分组依据（group-v1 固定规则：模型只判断字段，分组不由模型决定）</summary>
+          <summary>分组依据（group-v2 规则：模型只判断字段，分组由本地固定规则决定；2026-10-16 按用户指示降低门槛）</summary>
           <p style={{ margin: '4px 0 0' }}>
-            高意向＝五个条件同时满足：与本笔记产品直接相关＋有需求（明确或隐含）＋本产品可支持＋发言者是需求方＋有购买或问价信号，且本条评论自带证据。
-            有需求＝前三条满足，但缺购买/问价信号或本条证据不足。
-            口碑/讨论＝相关性只是周边、字段判断不了（需求/匹配未知）、模型标记了不确定、或发言身份存疑。
+            高意向＝与本笔记产品直接相关＋有需求（明确或隐含）＋本产品可支持＋发言者是需求方＋有购买、问价或找方案任一信号（不再要求本条评论自带证据）。
+            有需求＝可支持且有需求，但相关性只是周边、身份不是需求方，或没有购买/问价/找方案信号。
+            口碑/讨论＝相关性/需求/匹配有判断不了的字段、或模型标记了不确定。
             排除项＝无关、卖方推广、本产品不支持、或判断为没有需求。
+            旧分析结果打开即按新规则重新显示，不调用模型、不产生任何费用。
             觉得判错请用“修改分组/备注”纠正（不改变模型原判，纠正样本用于准确率评测）。
           </p>
         </details>

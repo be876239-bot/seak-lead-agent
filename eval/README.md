@@ -5,8 +5,8 @@
 - 32 条案例，全部显式标注 `"kind": "synthetic"`，由开发者手工构造，**不是真实采集评论，不代表真实中文效果**。
 - 覆盖场景：题库直接问价/购买、求资料、蹲更新、免费偏好（free_only）、已购/无需求否定、卖家广告、相邻竞赛混淆、竞品价格对比、父评论跨作者意图转移、短语评论（“+1”“多少钱？”）、提示注入文本、疑似反讽。
 - 每条含产品上下文（仅语义字段）、笔记文本、评论文本（含可选父评论）、gold `expectedDecision` 与 `expectedGroup`。gold 证据引文保证是实际输入文本（空白规范化后）的连续子串，由回归测试强制校验。
-- 回归入口：`tests/integration/synthetic-regression.test.ts`（校验输出校验器与 group-v1 规则对 gold 的一致性；同时约束高意向必须有当前评论自身证据、free_only 不得进高意向）。
-- 提示词更改必须同步递增 `src/ai/prompts.ts` 中的版本常量；分组规则更改递增 `RULE_VERSION`。
+- 回归入口：`tests/integration/synthetic-regression.test.ts`（校验输出校验器与 group-v2 规则对 gold 的一致性；约束高意向必为直接相关+需求方+付费/找方案信号、free_only 不得进高意向；v2 起不再要求自身证据）。
+- 提示词更改必须同步递增 `src/ai/prompts.ts` 中的版本常量；分组规则更改递增 `RULE_VERSION`。2026-10-16 group-v2 降门槛时，本集 32 条的 `expectedDecision` 未动，`expectedGroup` 已按 v2 规则机械重算（s03/s14/s23 need→high，s17/s26 review→need），依据见 docs/decisions.md D007。
 
 ## 真实评测（T30，尚未进行）
 

@@ -1,4 +1,5 @@
 import type { Analysis, Claim, Comment, Decision, Feedback, Group, Job, LeadState, Usage } from '../domain/schemas';
+import { groupDecision, RULE_VERSION } from '../domain/classification';
 
 export const GROUP_ORDER: Group[] = ['high_intent', 'need', 'review', 'excluded'];
 export const GROUP_TITLES: Record<Group, string> = {
@@ -6,9 +7,11 @@ export const GROUP_TITLES: Record<Group, string> = {
 };
 
 /** 枚举值以英文存库、属协议一部分不能改；界面一律映射为中文展示。 */
-export const INTENT_TARGET_CN: Record<Decision['intentTarget'], string> = {
-  our_product: '本产品', category: '品类（未指名产品）', competitor: '竞品', unknown: '未知',
-};
+export function intentShortCn(d: Decision): '意向本产品' | '意向该品类' | '无意向' {
+  if (d.intentTarget === 'our_product') return '意向本产品';
+  if (d.intentTarget === 'category' || d.intentTarget === 'competitor') return '意向该品类';
+  return '无意向';
+}
 export const PRODUCT_FIT_CN: Record<Decision['productFit'], string> = {
   supported: '本产品可支持', unsupported: '本产品不支持', unknown: '未知',
 };
@@ -48,9 +51,11 @@ export function buildLeadGroups(input: {
     const comment = byComment.get(a.commentKey);
     if (!comment) continue;
     const correction = latestCorrection.get(a.id) ?? null;
-    const group: Group = correction ? correction.correctedGroup! : a.group;
+    // 规则升级免费重算：存储分组是旧规则版本时，展示层按当前规则重判，不重新调用模型。
+    const ruleGroup: Group = a.ruleVersion === RULE_VERSION ? a.group : groupDecision(a.decision, true);
+    const group: Group = correction ? correction.correctedGroup! : ruleGroup;
     out[group].push({
-      comment, analysis: a, group, modelGroup: a.group,
+      comment, analysis: a, group, modelGroup: ruleGroup,
       source: correction ? 'human' : 'model', correction,
       handled: handledKeys.has(`${a.productId}:${a.commentKey}`),
     });

@@ -527,25 +527,25 @@ usage 以供应商实际返回为准，缺失记 null。人民币费用仅在配
 }
 ```
 
-本地转换为 high_intent，保存 group-v1。产品价格未知不妨碍识别“用户问价”，但不得生成具体价格或自动回复。
+本地转换为 high_intent，保存 ruleVersion=group-v2（2026-10-16 降门槛，见 D007）。产品价格未知不妨碍识别“用户问价”，但不得生成具体价格或自动回复。
 
-### 10.4 输出校验与分组顺序
+### 10.4 输出校验与分组顺序（group-v2）
 
 1. JSON 解析、Zod strict 校验；ID 集合严格等于请求集合。
 2. evidence sourceId 必须属于该条可用上下文，quote 为规范化空白后的连续子串；空引文不算证据。
-3. 高意向候选必须有当前评论自身证据，不能仅有 note/parent 引文。
+3. 引文造假无论何种分组一律拒绝；v2 起高意向不再要求证据必须出自当前评论自身。
 4. 校验不通过的批次不写 completed；正常负面判断与格式错误必须区分。
-5. 分组使用以下有序规则，保存 ruleVersion=group-v1：
+5. 分组使用以下有序规则，保存 ruleVersion=group-v2：
 
 | 优先级 | 条件 | 分组 |
 |---|---|---|
 | 1 | unrelated 或 seller 或 productFit=unsupported 或 need=none | excluded |
-| 2 | relevance=unknown/adjacent，或 need=unknown，或 productFit=unknown，或 uncertainty 非空 | review |
-| 3 | direct + need explicit/implicit + productFit supported + seeker + explicit_buy/price_or_access + 当前评论证据 | high_intent |
-| 4 | direct + need explicit/implicit + productFit supported | need |
-| 5 | 其他 | review |
+| 2 | uncertainty 非空 | review |
+| 3 | need 非 explicit/implicit，或 productFit≠supported，或 relevance=unknown | review |
+| 4 | direct + seeker + explicit_buy/price_or_access/solution_seeking | high_intent |
+| 5 | 其余（均需前三道闸门通过） | need |
 
-free_only 只能进 need 或 review，不进 high_intent。competitor 可以表示相关品类的高购买信号，但卡片必须标“询问竞品”，不能标“想买本产品”。角色不确定不判 high_intent。
+free_only 或无购买/找方案信号、相邻领域（adjacent）、身份非需求方（sharer/unknown）只进 need，不进 high_intent。competitor 可以表示相关品类的高购买信号，但卡片必须标“指向竞品，并非本产品”，不能标“想买本产品”。展示层意向统一并为三档中文：意向本产品（our_product）/意向该品类（category、competitor）/无意向（unknown），存储与导出仍用协议枚举值。规则升级只改显示闸门：缓存键固定使用 CACHE_RULE_VERSION=group-v1（分组规则不影响模型判断），规则升级绝不使已付费结果失效；旧 ruleVersion 的行由展示层 buildLeadGroups 按当前规则免费重算，人工纠正始终优先于重算结果。
 
 同一分组按需求明确度、原评论时间（可靠时）、采集时间排序；不引入虚构成交概率。不必实现 0–100 评分。
 

@@ -5,7 +5,7 @@ import type { ErrorCode as Code } from '../domain/errors';
 import { AppError } from '../domain/errors';
 import { contextHash, dedupeComments, hash64 } from '../domain/identity';
 import { RULE_VERSION, groupDecision } from '../domain/classification';
-import { buildCacheKey, filterUncached } from './cache';
+import { buildCacheKey, CACHE_RULE_VERSION, filterUncached } from './cache';
 import { LOCK_NAME, type LockHandle, type TaskLockManager } from './lock';
 import { commentEstimate, planCommentBatches } from '../ai/batching';
 import {
@@ -85,7 +85,7 @@ function buildCandidates(
       cacheKey: buildCacheKey({
         productId: product.id, profileVersion: product.profileVersion, commentKey: c.commentKey,
         contextHash: ch, provider: deps.providerName, modelId: deps.modelId,
-        promptVersion: COMMENT_PROMPT_VERSION, ruleVersion: RULE_VERSION,
+        promptVersion: COMMENT_PROMPT_VERSION, ruleVersion: CACHE_RULE_VERSION,
       }),
     };
   });

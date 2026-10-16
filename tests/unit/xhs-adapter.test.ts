@@ -40,7 +40,7 @@ describe('parseLoadedComments — note-detail-expanded', () => {
     expect(top.parentElementId).toBeNull();
     expect(top.text).toContain('我们也有这个需求');
     expect(top.authorDisplayName).toBe('anonuser2');
-    expect(top.profileUrl).toBe('/user/profile/anonuser2');
+    expect(top.profileUrl).toBe('https://www.xiaohongshu.com/user/profile/anonuser2');
     expect(top.authorLocalKey).toBe('anonuser2');
     expect(top.publishedText).toBe('2天前');
     expect(top.locationText).toBe('江苏');
@@ -67,6 +67,18 @@ describe('parseLoadedComments — note-detail-expanded', () => {
       expect(c.parentElementId, c.elementId ?? '').not.toBeNull();
       expect(topIds.has(c.parentElementId), c.elementId ?? '').toBe(true);
     }
+  });
+
+  it('主页链接带 xsec_token 等跟踪参数：ID 只取路径段，链接转绝对 URL', () => {
+    const dom = new JSDOM(
+      `<div id="noteContainer"><div class="comments-el"><div class="list-container"><div class="parent-comment">` +
+      `<div class="comment-item" id="comment-0001"><div class="author"><a class="name" href="/user/profile/5f8a2b?xsec_token=AB7q=&xsec_source=pc_comment">某昵称</a></div>` +
+      `<div class="content"><span class="note-text">多少钱</span></div></div></div></div></div></div>`,
+    );
+    const [c] = parseLoadedComments(dom.window.document, NOTE_KEY);
+    expect(c!.authorLocalKey).toBe('5f8a2b');
+    expect(c!.profileUrl).toBe('https://www.xiaohongshu.com/user/profile/5f8a2b');
+    expect(c!.authorLocalKey).not.toContain('xsec');
   });
 });
 

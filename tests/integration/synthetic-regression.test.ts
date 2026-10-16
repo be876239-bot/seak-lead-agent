@@ -60,8 +60,8 @@ describe('eval/synthetic.jsonl 模拟回归集（全部 synthetic，非真实中
     }
   });
 
-  it(`group-v1 规则复算与 expectedGroup 一致（gold 可解释）`, () => {
-    expect(RULE_VERSION).toBe('group-v1');
+  it(`group-v2 规则复算与 expectedGroup 一致（gold 可解释）`, () => {
+    expect(RULE_VERSION).toBe('group-v2');
     for (const c of cases) {
       const [validated] = validateClassificationOutput(
         { results: [{ ...c.expectedDecision, commentId: 'c001' }] },
@@ -72,9 +72,11 @@ describe('eval/synthetic.jsonl 模拟回归集（全部 synthetic，非真实中
     }
   });
 
-  it('高意向样本全部有当前评论自身证据；free_only 无一进高意向', () => {
+  it('高意向必为直接相关+需求方+付费/找方案信号；free_only 无一进高意向（v2 不再要求自身证据）', () => {
     for (const c of cases.filter((x) => x.expectedGroup === 'high_intent')) {
-      expect(c.expectedDecision.evidence.every((e) => e.sourceId === 'c001:text'), c.id).toBe(true);
+      expect(c.expectedDecision.relevance, c.id).toBe('direct');
+      expect(c.expectedDecision.speakerRole, c.id).toBe('seeker');
+      expect(['explicit_buy', 'price_or_access', 'solution_seeking'], c.id).toContain(c.expectedDecision.purchaseIntent);
       expect(c.expectedDecision.purchaseIntent, c.id).not.toBe('free_only');
     }
   });

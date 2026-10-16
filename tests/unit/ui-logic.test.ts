@@ -16,7 +16,7 @@ function comment(id: string, capturedAt: string): Comment {
   };
 }
 
-function analysis(id: string, commentKey: string, group: Group): Analysis {
+function analysis(id: string, commentKey: string, group: Group, ruleVersion = 'group-v2'): Analysis {
   return {
     id, cacheKey: `${id}padpadpadpad`, productId: PID, profileVersion: 1, commentKey,
     contextHash: 'aaaaaaaa', decision: {
@@ -24,7 +24,7 @@ function analysis(id: string, commentKey: string, group: Group): Analysis {
       speakerRole: 'seeker', intentTarget: 'our_product', productFit: 'supported',
       needSummary: '询价', evidence: [], reason: 'r', uncertainty: null,
     },
-    group, modelId: 'm', promptVersion: 'p', ruleVersion: 'group-v1', createdAt: '2026-10-15T00:00:00Z',
+    group, modelId: 'm', promptVersion: 'p', ruleVersion, createdAt: '2026-10-15T00:00:00Z',
   };
 }
 
@@ -77,6 +77,22 @@ describe('buildLeadGroups', () => {
       feedback: [], leadStates: [],
     });
     expect(groups.excluded.map((v) => v.comment.text)).toEqual(['评论2', '评论1']);
+  });
+
+  it('旧规则版本的行打开即按当前规则免费重算，人工纠正仍优先', () => {
+    // 该 decision 在 v1 存储时判为 review，v2 规则下是 high_intent；重算不调用模型、不产生费用
+    const a = analysis('e'.repeat(36), 'n:c1', 'review', 'group-v1');
+    const groups = buildLeadGroups({ analyses: [a], comments: [comment('1', '2026-10-15T00:00:00Z')], feedback: [], leadStates: [] });
+    expect(groups.review.length).toBe(0);
+    expect(groups.high_intent[0]!.group).toBe('high_intent');
+    expect(groups.high_intent[0]!.modelGroup).toBe('high_intent');
+    expect(groups.high_intent[0]!.analysis.ruleVersion).toBe('group-v1'); // 存储原样不动
+    const fb: Feedback = {
+      id: 'f9'.padEnd(36, '0').slice(0, 36) as string, productId: PID, commentKey: 'n:c1',
+      analysisId: a.id, correctedGroup: 'need', note: null, createdAt: '2026-10-15T04:00:00Z',
+    };
+    const g2 = buildLeadGroups({ analyses: [a], comments: [comment('1', '2026-10-15T00:00:00Z')], feedback: [fb], leadStates: [] });
+    expect(g2.need[0]!.group).toBe('need'); // 纠正优先于重算
   });
 });
 
