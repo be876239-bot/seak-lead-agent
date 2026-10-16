@@ -30,7 +30,7 @@ export const RequestSchema = z.discriminatedUnion('type', [
   }),
   z.object({
     protocol: z.literal(PROTOCOL_VERSION), requestId: RequestId, type: z.literal('XHS_GET_SNAPSHOT'),
-    payload: z.object({ sessionId: z.string().min(1).max(64), expectedNoteKey: z.string().min(1).max(256), cursor: z.string().max(256).nullable() }),
+    payload: z.object({ sessionId: z.string().min(1).max(64), expectedNoteKey: z.string().min(1).max(256), cursor: z.string().max(256).nullable(), advance: z.boolean().optional() }),
   }),
   z.object({
     protocol: z.literal(PROTOCOL_VERSION), requestId: RequestId, type: z.literal('XHS_STOP_SESSION'),
@@ -88,6 +88,7 @@ export const SnapshotPayload = z.object({
   hasMoreLoaded: z.boolean(),
   truncated: z.boolean(),
   nextCursor: z.string().max(256).nullable(),
+  endOfList: z.boolean().optional(),
 });
 export type SnapshotPayload = z.infer<typeof SnapshotPayload>;
 

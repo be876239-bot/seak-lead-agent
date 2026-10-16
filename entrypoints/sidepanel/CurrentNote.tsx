@@ -15,6 +15,7 @@ import { getSelectedProductId, ui } from '../../src/ui/store';
 import { emitLocalJobLog } from '../../src/ui/joblog';
 import JobLogPanel from './JobLog';
 import LeadExplanation from '../../src/ui/LeadExplanation';
+import CollectionProgressView from '../../src/ui/CollectionProgress';
 
 const JOB_KEY = 'note.lastJobId';
 
@@ -119,7 +120,7 @@ export default function CurrentNote() {
   }, [refreshTab, loadResults]);
 
   const fullRetry = async () => {
-    if (!window.confirm('完整重试：重新读取本页已加载评论并创建新任务，全部评论重新过一遍流程——已分析成功的命中缓存、不重复计费；失败或未分析过的会重新提交模型。继续？')) return;
+    if (!window.confirm('完整重试：重新从当前笔记滚动采集评论（最多500条）并创建新任务。已分析成功的命中缓存、不重复计费；失败或未分析过的会提交模型。继续？')) return;
     await analyze();
   };
 
@@ -196,7 +197,7 @@ export default function CurrentNote() {
   };
 
   const noteChanged = !!job?.noteKey && !!status?.noteKey && job.noteKey !== status.noteKey;
-  const analyzeLabel = job?.noteKey && groups ? '新增分析（只处理未分析过的评论）' : '读取并分析已加载评论';
+  const analyzeLabel = job?.noteKey && groups ? '继续采集评论并分析新增' : '开始采集评论（完成后分析）';
 
   return (
     <div style={{ display: 'grid', gap: 10, fontSize: 13 }}>
@@ -233,15 +234,16 @@ export default function CurrentNote() {
       </div>
       {!busy && (
         <p style={{ color: '#888', margin: 0, fontSize: 11 }}>
-          想要更多评论：先在页面里手动向下滚动，让小红书加载完再点分析（只分析页面已加载评论，不做自动滚动，避免触发风控）；再次分析时已分析过的走缓存、不重复计费。
+          点击后会小步滚动当前笔记，增量保存网页加载出的评论（最多500条）；多轮未新增即停止，不保证采集全部。遇平台登录/验证码限制请手动处理，不会绕过；折叠回复仍需人工展开。再次分析时已有结果走缓存。
         </p>
       )}
       {job && (
         <p role="status" style={{ margin: 0 }}>
           任务：{jobPhaseLabel(job)}{job.errorCode ? `（${job.errorCode}）` : ''}
-          {loadedCount != null && ` · 已读取 ${loadedCount} 条已加载评论（非全部评论）`}
+          {loadedCount != null && ` · 本地累计 ${loadedCount} 条评论（非全量保证）`}
         </p>
       )}
+      {job?.collection && <CollectionProgressView progress={job.collection} />}
       {job?.totalItems === 0 && job?.status === 'completed' && loadedCount === 0 && (
         <p style={{ color: '#777', margin: 0 }}>页面没有已加载评论：请先在笔记页手动展开评论区再分析。</p>
       )}

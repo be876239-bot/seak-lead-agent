@@ -104,22 +104,29 @@ export function registerAnalysisHandlers(): void {
     const product = await analysisRepos.getProduct(productId);
     if (!product) throw new AppError('STORAGE_ERROR', '产品不存在');
     await upsertJob({
-      ...baseJob(deps, jobId), kind: 'comments', tabId, productId,
+      ...baseJob(deps, jobId), kind: 'comments', tabId, productId, status: 'collecting',
       totalItems: 0, promptVersion: COMMENT_PROMPT_VERSION,
     });
-    emitJobLog(jobId, `任务开始（模型 ${deps.modelId}）；读取当前页已加载评论`);
-    const flag = { cancelled: false };
+    emitJobLog(jobId, `任务开始（模型 ${deps.modelId}）；增量采集当前笔记评论（正常滚动，最多500条）`);
+    const controller = new AbortController();
+    const flag = { cancelled: false, controller };
     capturing.set(jobId, flag);
     void (async () => {
-      const snap = await captureNote(tabId);
+      const snap = await captureNote(tabId, {
+        autoLoad: true, signal: controller.signal,
+        onDelta: (note, comments) => analysisRepos.saveCaptureDelta(jobId, note, comments, controller.signal),
+        onProgress: async (collection) => {
+          if (flag.cancelled) return;
+          await analysisRepos.updateJob(jobId, { collection });
+          if (collection.stopReason) emitJobLog(jobId, `采集停止：${collection.stopReason}；累计${collection.discoveredCount}条（不代表全部评论）`);
+        },
+      });
       if (flag.cancelled) {
         emitJobLog(jobId, '采集阶段被取消');
         await analysisRepos.updateJob(jobId, { status: 'cancelled', errorCode: 'CANCELLED' });
         return;
       }
-      emitJobLog(jobId, `已读取 ${snap.comments.length} 条已加载评论${snap.truncated ? '（超出上限，仅部分）' : ''}`);
-      await analysisRepos.putNote(snap.note);
-      await analysisRepos.putComments(snap.comments);
+      emitJobLog(jobId, `已累计保存 ${snap.comments.length} 条评论${snap.truncated ? '（达到安全上限）' : ''}；停止原因：${snap.stopReason ?? '快照'}，不承诺全部评论`);
       const job = await runCommentsJob(deps, {
         productId, note: snap.note, comments: snap.comments, jobId, tabId,
         log: (m) => emitJobLog(jobId, m),
@@ -156,7 +163,10 @@ export function registerAnalysisHandlers(): void {
     if (flag) {
       flag.cancelled = true;
       flag.controller?.abort();
-      await analysisRepos.updateJob(jobId, { status: 'cancelled', errorCode: 'CANCELLED' });
+      const job = await analysisRepos.getJob(jobId);
+      await analysisRepos.updateJob(jobId, { status: 'cancelled', errorCode: 'CANCELLED',
+        ...(job?.collection ? { collection: { ...job.collection, loading: false, stopReason: 'cancelled' as const } } : {}),
+      });
       return { cancelling: true };
     }
     return { cancelling: false };

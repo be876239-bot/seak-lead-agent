@@ -1,6 +1,6 @@
 # 觅客Agent 测试报告（T28 自动化回归 + T31 静态审查）
 
-**最新本轮结果见第 6 节：22 文件 / 216 项通过。第 1–5 节是此前执行者留下的历史报告，不代表本轮重跑全部真机矩阵。**
+**最新结果见第 7 节：24 文件 / 235 项通过。第 1–6 节为历史阶段记录，不代表本轮真实小红书验收通过。**
 
 日期：2026-10-16（UTC+8 夜间执行）。执行者：Qoder agent；命令均在项目根目录真实运行，输出原样摘录。
 
@@ -92,3 +92,29 @@ ZIP 均 11 个条目，可用 ZipFile 打开，含 `licenses/linkedom.txt`；无
 **展示验证与真实闭环分开**：本轮内置浏览器打开 localhost 合成 LeadExplanation 预览，观察截图中 320/390/560px 三种卡片宽度，理由、证据、不确定点和主页链接可见，未点小红书链接。组件测试使用 React SSR + DOM，用户真实数据未参与；临时预览已关闭。这只证明合成组件呈现，不能替代 T29 的扩展安装/权限/侧边栏交互。
 
 **尚未验证**：Edge/Chrome 实际加载新包、真实产品页面和搜索方向、真实小红书评论与跳转、真实模型质量、MV3 长队列/休眠恢复、真实用户价值。JEV/数值评分没有实现；不报告准确率。G3/T29/T30/T31 真机项不勾选，ZIP 标为待实测开发包。
+
+## 7. 2026-10-16 增量采集修复验证
+
+本轮起始HEAD `0148c38`，分支codex/eric-development，起始工作区干净。用户新增授权仅为当前笔记内正常滚动触发网页懒加载，见D009与 `incremental-capture-2026-10-16.md`。
+
+实际使用 Node v26.7.0 / pnpm 10.33.0。命令前缀统一 `npx --offline --yes pnpm@10.33.0`：
+
+| 命令 | 实际结果 |
+|---|---|
+| typecheck | exit 0 |
+| lint | exit 0 |
+| test | **24 文件 / 235 项全通过**，比上轮新增19项 |
+| build | exit 0，Chrome生产构建，总解压尺寸约1.08 MB |
+| zip | exit 0，Chrome ZIP 约350.92 kB |
+| zip:edge | exit 0，Edge生产构建与ZIP **350,917 B** |
+| git diff --check | 通过；仅Git行尾策略提示 |
+
+新增测试：xhs-incremental.test.ts 15项、collection-progress.test.ts 2项、xhs-capture.test.ts 新增2项。初始9项增量复现全部失败（旧代码只读20条、不滚动、不逐轮落库），修复后通过；保留原有会话分页、批次、缓存、锁、AI与脱敏回归。新测试在合成DOM和fake-indexeddb中覆盖用户A–I及延迟、平台遮挡、换帖、未知容器、弱身份重复取样、空评论、取消后迟到写入、消息超时/取消。
+
+合成浏览器：内置浏览器只点击一次开始，生产captureNote/Session用真实scrollBy触发模拟DOM替换；首屏20→40，实际本地IndexedDB40，首屏评论1在DOM=false、在数据库=true；no_new停止，UI明确未确认全部。截图在 `evidence/incremental-capture-synthetic.png`。这是合成浏览器/本地存储证据，不是真实小红书或Edge扩展安装证据。
+
+Edge ZIP可正常读取，11项资源；包内JS/JSON/HTML与edge-mv3构建逐项一致，未包含.env/tests/eval/node_modules，Key格式扫描命中0（非完备秘密证明）。manifest权限与小红书匹配域未改变。构建仍有已有Zod注释annotation警告，未导致失败。
+
+冻结范围核验：git diff检查确认prompts.ts、classification.ts、cache.ts、batching.ts、runner.ts均无本轮修改。未新增JEV、数字评分、模型、平台、支付或云端任务。
+
+**真实验收：NOT VERIFIED。** 新Edge包未在用户真实小红书页面加载；验证码/评论权限、真实滚动容器和懒加载兼容性、MV3休眠/恢复均未验证。不声称采集全部。下一步按增量采集报告的真实验收步骤执行，不手动助载，并检查首屏数据留存、数量增长、去重和取消。

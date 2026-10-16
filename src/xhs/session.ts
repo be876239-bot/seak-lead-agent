@@ -39,6 +39,7 @@ class ActiveSession {
   keySet = new Set<string>();
   elementKey = new Map<string, string>();
   elementOrdinal = new Map<string, number>();
+  weakElements = new WeakMap<Element, { signature: string; ordinal: number }>();
   version = 0;
   limitReached = false;
   lastActivityAt: number;
@@ -67,7 +68,7 @@ export class XhsSessionManager {
     switch (req.type) {
       case 'XHS_GET_STATUS': return this.status();
       case 'XHS_START_SESSION': return this.start(req.payload.expectedNoteKey);
-      case 'XHS_GET_SNAPSHOT': return this.snapshot(req.payload.sessionId, req.payload.expectedNoteKey, req.payload.cursor);
+      case 'XHS_GET_SNAPSHOT': return this.snapshot(req.payload.sessionId, req.payload.expectedNoteKey, req.payload.cursor, req.payload.advance);
       case 'XHS_STOP_SESSION': return this.stop(req.payload.sessionId);
       default: throw new AppError('UNKNOWN', '不支持的消息类型');
     }
@@ -125,12 +126,23 @@ export class XhsSessionManager {
     const session = this.session;
     if (session.id !== sessionId) throw new AppError('SNAPSHOT_EXPIRED', '会话 ID 不匹配');
     if (session.noteKey !== expectedNoteKey) throw new AppError('PAGE_CHANGED', '笔记已切换，本会话不再返回数据');
+    if (parseNote(this.getDoc()).noteKey !== session.noteKey) {
+      this.endSession('page_changed');
+      throw new AppError('PAGE_CHANGED', '当前笔记已切换，停止采集');
+    }
     session.lastActivityAt = this.now();
     return session;
   }
 
-  private snapshot(sessionId: string, expectedNoteKey: string, cursor: string | null): SnapshotPayload {
+  private snapshot(sessionId: string, expectedNoteKey: string, cursor: string | null, advance = false): SnapshotPayload {
     const session = this.assertLive(sessionId, expectedNoteKey);
+    if (!cursor) this.ingest(true);
+    if (advance && !session.limitReached) {
+      if (cursor) throw new AppError('SNAPSHOT_EXPIRED', '分页期间不能滚动加载');
+      this.scrollComments();
+      this.assertLive(sessionId, expectedNoteKey);
+      this.ingest(true);
+    }
     let offset = 0;
     if (cursor) {
       const parsed = parseCursor(cursor);
@@ -146,6 +158,30 @@ export class XhsSessionManager {
       offset = parsed.offset;
     }
     return this.buildChunk(offset);
+  }
+
+  /** 只滚动已确认评论列表在当前笔记内的可滚动祖先，不点击按钮、不访问接口。 */
+  private scrollComments(): void {
+    const doc = this.getDoc();
+    const root = doc.querySelector(SEL.noteRoot);
+    let el = doc.querySelector<HTMLElement>(SEL.listContainer);
+    let shortList: HTMLElement | null = null;
+    while (el && root?.contains(el)) {
+      const style = doc.defaultView?.getComputedStyle(el);
+      if (/(auto|scroll)/.test(style?.overflowY || style?.overflow || '') && el.clientHeight > 0) {
+        shortList ??= el;
+        if (el.scrollHeight > el.clientHeight) {
+          el.scrollBy({ top: Math.max(120, Math.min(800, el.clientHeight * 0.75)), behavior: 'instant' });
+          return;
+        }
+      }
+      el = el.parentElement;
+    }
+    if (shortList) {
+      shortList.scrollBy({ top: 120, behavior: 'instant' });
+      return; // 内容暂不足一屏仍等待多轮，不把它当解析错误或全量终点。
+    }
+    throw new AppError('PARSE_FAILED', '无法确认当前笔记的评论滚动容器；已停止，已保存评论保留');
   }
 
   private stop(sessionId: string): { stopped: boolean } {
@@ -177,17 +213,20 @@ export class XhsSessionManager {
       hasMoreLoaded: hasMore,
       truncated: session.limitReached,
       nextCursor: hasMore ? `${session.id}.${session.version}.${offset + chunk.length}` : null,
+      // 只使用现有真实 fixture 证实的空评论标志；不能用“未新增”冒充平台末尾。
+      endOfList: session.buffer.length === 0 && !!this.getDoc().querySelector(`${SEL.commentsArea} ${SEL.noComments}`),
     };
   }
 
   /** 增量读取：先打码再暂存；500 条上限后停止增加。 */
-  private ingest(): void {
+  private ingest(strict = false): void {
     const session = this.session;
     if (!session) return;
     let parsedList: ParsedComment[];
     try {
       parsedList = parseLoadedComments(this.getDoc(), session.noteKey);
-    } catch {
+    } catch (err) {
+      if (strict) throw err;
       return;
     }
     const capturedAt = isoNow(this.now);
@@ -203,7 +242,13 @@ export class XhsSessionManager {
       if (p.elementId && !session.elementOrdinal.has(p.elementId)) {
         session.elementOrdinal.set(p.elementId, this.ordinal++);
       }
-      const ordinal = p.elementId ? session.elementOrdinal.get(p.elementId)! : this.ordinal++;
+      const signature = `${text}\u0001${p.authorLocalKey ?? ''}\u0001${p.publishedText ?? ''}\u0001${parentKey ?? ''}`;
+      let weak = session.weakElements.get(p.sourceElement);
+      if (!weak || weak.signature !== signature) {
+        weak = { signature, ordinal: this.ordinal++ };
+        session.weakElements.set(p.sourceElement, weak);
+      }
+      const ordinal = p.elementId ? session.elementOrdinal.get(p.elementId)! : weak.ordinal;
       const identity = commentIdentity({
         noteKey: session.noteKey,
         platformCommentId: p.platformCommentId,
@@ -236,13 +281,15 @@ export class XhsSessionManager {
       });
       session.version += 1;
     }
+    if (session.buffer.length >= LIMITS.maxSessionComments) session.limitReached = true;
   }
 
   private attachObserver(): void {
     this.observer?.disconnect();
     const doc = this.getDoc();
-    this.observer = new MutationObserver(() => this.scheduleCheck());
-    this.observer.observe(doc.documentElement, { childList: true, subtree: true });
+    // 微任务即提取，避免500ms防抖期间可见项已被虚拟列表移除。
+    this.observer = new MutationObserver(() => this.checkDom());
+    this.observer.observe(doc.documentElement, { childList: true, subtree: true, characterData: true });
   }
 
   private scheduleCheck(): void {

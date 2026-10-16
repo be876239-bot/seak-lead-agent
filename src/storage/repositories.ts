@@ -108,6 +108,19 @@ export class Repositories {
     await this.db.comments.bulkPut(comments);
   }
 
+  /** 每轮采集立即落库；与取消状态共用事务，取消确认后不再接受该任务的写入。 */
+  async saveCaptureDelta(jobId: string, note: Note, comments: Comment[], signal: AbortSignal): Promise<void> {
+    await this.db.transaction('rw', [this.db.jobs, this.db.notes, this.db.comments], async () => {
+      const job = await this.db.jobs.get(jobId);
+      if (signal.aborted || job?.status !== 'collecting') throw new AppError('CANCELLED', '采集已停止，不再写入评论');
+      if (job.noteKey && job.noteKey !== note.noteKey) throw new AppError('PAGE_CHANGED', '采集笔记已变化');
+      if (comments.some((c) => c.noteKey !== note.noteKey)) throw new AppError('PAGE_CHANGED', '拒绝混入其他笔记评论');
+      await this.db.notes.put(note);
+      await this.db.comments.bulkPut(comments);
+      await this.db.jobs.update(jobId, { noteKey: note.noteKey, updatedAt: nowIso() });
+    });
+  }
+
   // ---- analyses: 唯一 cacheKey，重复不覆盖 ----
   async insertAnalysisIfAbsent(analysis: Analysis): Promise<boolean> {
     try {

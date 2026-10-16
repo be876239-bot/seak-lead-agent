@@ -145,6 +145,13 @@ export const LeadStateSchema = z.object({
 export type LeadState = z.infer<typeof LeadStateSchema>;
 
 export const JobKind = z.enum(['product', 'comments']);
+export const CaptureProgressSchema = z.object({
+  discoveredCount: z.number().int().min(0).max(LIMITS.maxSessionComments),
+  addedCount: z.number().int().min(0).max(LIMITS.maxSessionComments),
+  loading: z.boolean(),
+  stopReason: z.enum(['no_new', 'no_more', 'limit', 'time_limit', 'round_limit', 'cancelled', 'error']).nullable(),
+});
+export type CaptureProgress = z.infer<typeof CaptureProgressSchema>;
 export const JobStatus = z.enum([
   'created', 'collecting', 'analyzing', 'completed', 'partial', 'failed', 'cancelled', 'interrupted',
 ]);
@@ -167,6 +174,7 @@ export const JobSchema = z.object({
   createdAt: UtcIso,
   updatedAt: UtcIso,
   errorCode: z.string().max(64).nullable(),
+  collection: CaptureProgressSchema.optional(),
 });
 export type Job = z.infer<typeof JobSchema>;
 

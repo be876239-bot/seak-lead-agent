@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildError, buildOk } from '../../src/messaging/protocol';
 import type { Comment, Note } from '../../src/domain/schemas';
 import { AppError } from '../../src/domain/errors';
@@ -47,8 +47,29 @@ function route(handlers: Handlers): void {
 }
 
 beforeEach(() => { sendMessage.mockReset(); });
+afterEach(() => vi.useRealTimers());
 
 describe('captureNote 采集编排', () => {
+  it('采集中页面消息不返回，取消仍能立即终止等待并发送STOP', async () => {
+    const ac = new AbortController();
+    route({
+      XHS_GET_STATUS: () => statusOk(),
+      XHS_START_SESSION: () => buildOk('r', snapshot([comment('1')], null)),
+      XHS_GET_SNAPSHOT: () => { queueMicrotask(() => ac.abort()); return new Promise(() => {}); },
+      XHS_STOP_SESSION: () => buildOk('r', { stopped: true }),
+    });
+    await expect(captureNote(7, { autoLoad: true, signal: ac.signal })).rejects.toMatchObject({ code: 'CANCELLED' });
+    expect(sendMessage.mock.calls.at(-1)![1].type).toBe('XHS_STOP_SESSION');
+  });
+
+  it('页面消息超时有明确错误，不无限等待', async () => {
+    vi.useFakeTimers();
+    sendMessage.mockReturnValue(new Promise(() => {}));
+    const assertion = expect(captureNote(7)).rejects.toMatchObject({ code: 'PARSE_FAILED', retryable: true });
+    await vi.advanceTimersByTimeAsync(10_001);
+    await assertion;
+  });
+
   it('按 cursor 翻页汇总全部评论，结束后必发 STOP', async () => {
     let snapCalls = 0;
     route({

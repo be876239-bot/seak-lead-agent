@@ -1,6 +1,7 @@
 import { browser } from 'wxt/browser';
 import { AppError } from '../domain/errors';
-import type { Comment, Note } from '../domain/schemas';
+import { LIMITS } from '../domain/limits';
+import type { CaptureProgress, Comment, Note } from '../domain/schemas';
 import {
   buildRequest, ResponseSchema, SnapshotPayload, XhsStatusPayload, type Request,
 } from '../messaging/protocol';
@@ -12,14 +13,27 @@ export type CapturedNote = {
   comments: Comment[];
   truncated: boolean;
   hasMoreLoaded: boolean;
+  stopReason?: CaptureProgress['stopReason'];
 };
 
-async function ask(tabId: number, req: Request): Promise<unknown> {
+async function ask(tabId: number, req: Request, signal?: AbortSignal): Promise<unknown> {
   let raw: unknown;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let abort: (() => void) | undefined;
   try {
-    raw = await browser.tabs.sendMessage(tabId, req);
-  } catch {
+    raw = await new Promise((resolve, reject) => {
+      abort = () => reject(new AppError('CANCELLED', '评论采集已取消'));
+      if (signal?.aborted) { abort(); return; }
+      signal?.addEventListener('abort', abort, { once: true });
+      timer = setTimeout(() => reject(new AppError('PARSE_FAILED', '页面采集请求超时；已停止，已保存评论保留', true)), LIMITS.captureMessageTimeoutMs);
+      Promise.resolve(browser.tabs.sendMessage(tabId, req)).then(resolve, reject);
+    });
+  } catch (err) {
+    if (err instanceof AppError) throw err;
     throw new AppError('PAGE_UNSUPPORTED', '无法连接笔记页面脚本：请刷新该小红书标签页后重试（扩展重新加载后旧标签页的脚本会失效）', true);
+  } finally {
+    clearTimeout(timer);
+    if (abort) signal?.removeEventListener('abort', abort);
   }
   const res = ResponseSchema.safeParse(raw);
   if (!res.success) throw new AppError('PARSE_FAILED', '页面脚本返回了非法响应');
@@ -35,37 +49,135 @@ export async function getNoteStatus(tabId: number): Promise<XhsStatusPayload> {
   return XhsStatusPayload.parse(await ask(tabId, buildRequest('XHS_GET_STATUS', {})));
 }
 
-/** 从指定标签页采集“已加载”的笔记与评论：STATUS → START → 按 cursor 翻页 → STOP。绝不自动滚动。 */
-export async function captureNote(tabId: number): Promise<CapturedNote> {
+export type CaptureOptions = {
+  autoLoad?: boolean;
+  signal?: AbortSignal;
+  onDelta?: (note: Note, comments: Comment[]) => Promise<void>;
+  onProgress?: (progress: CaptureProgress) => Promise<void> | void;
+  /** 测试可注入等待；生产默认可取消的500ms采样。 */
+  wait?: (ms: number, signal?: AbortSignal) => Promise<void>;
+};
+
+function checkCancelled(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new AppError('CANCELLED', '评论采集已取消');
+}
+
+function waitForLoad(ms: number, signal?: AbortSignal): Promise<void> {
+  checkCancelled(signal);
+  return new Promise((resolve, reject) => {
+    const abort = () => { clearTimeout(timer); reject(new AppError('CANCELLED', '评论采集已取消')); };
+    const timer = setTimeout(() => { signal?.removeEventListener('abort', abort); resolve(); }, ms);
+    signal?.addEventListener('abort', abort, { once: true });
+  });
+}
+
+/** STATUS → START → 分页累计/持久化 → 小步滚动/等待/再累计 → STOP。 */
+export async function captureNote(tabId: number, options: CaptureOptions = {}): Promise<CapturedNote> {
+  const { signal } = options;
+  checkCancelled(signal);
   const status = await getNoteStatus(tabId);
-  if (status.blocked) throw new AppError('PAGE_BLOCKED', '页面当前被限流或验证码拦截，请稍后手动处理后再试');
-  if (!status.supported || !status.noteKey) {
-    throw new AppError('PAGE_UNSUPPORTED', '当前标签页不是受支持的小红书笔记页');
-  }
+  checkCancelled(signal);
+  if (status.blocked) throw new AppError('PAGE_BLOCKED', '平台限制：登录或风控遮挡，请手动处理后重试');
+  if (!status.supported || !status.noteKey) throw new AppError('PAGE_UNSUPPORTED', '当前标签页不是受支持的小红书笔记页');
   const expectedNoteKey = status.noteKey;
-
-  const first = SnapshotPayload.parse(await ask(tabId, buildRequest('XHS_START_SESSION', { expectedNoteKey })));
-  const comments: Comment[] = [...first.comments];
-  let note: Note | null = first.note;
-  let truncated = first.truncated;
-  let hasMoreLoaded = first.hasMoreLoaded;
-  let cursor = first.nextCursor;
-
-  try {
-    while (cursor) {
-      const page = SnapshotPayload.parse(await ask(tabId, buildRequest('XHS_GET_SNAPSHOT', {
-        sessionId: first.sessionId, expectedNoteKey, cursor,
-      })));
-      comments.push(...page.comments);
-      note ??= page.note;
-      truncated ||= page.truncated;
-      hasMoreLoaded ||= page.hasMoreLoaded;
-      cursor = page.nextCursor;
+  const found = new Map<string, Comment>();
+  let first: SnapshotPayload | null = null;
+  let stopPromise: Promise<unknown> | null = null;
+  const stop = () => {
+    if (first && !stopPromise) stopPromise = ask(tabId, buildRequest('XHS_STOP_SESSION', { sessionId: first.sessionId })).catch(() => {});
+    return stopPromise;
+  };
+  const abort = () => { void stop(); };
+  let note: Note | null = null;
+  let truncated = false;
+  let hasMoreLoaded = false;
+  let endOfList = false;
+  let addedCount = 0;
+  const report = async (loading: boolean, stopReason: CaptureProgress['stopReason'] = null) => {
+    await options.onProgress?.({ discoveredCount: found.size, addedCount, loading, stopReason });
+  };
+  const accept = async (page: SnapshotPayload) => {
+    checkCancelled(signal);
+    if (page.noteKey !== expectedNoteKey || page.sessionId !== first!.sessionId || (page.note && page.note.noteKey !== expectedNoteKey)) {
+      throw new AppError('PAGE_CHANGED', '快照所属笔记或会话改变，已停止采集');
     }
+    note ??= page.note;
+    if (!note) throw new AppError('PARSE_FAILED', '未能解析笔记内容');
+    const delta = page.comments.filter((c) => !found.has(c.commentKey));
+    if (delta.some((c) => c.noteKey !== expectedNoteKey)) throw new AppError('PAGE_CHANGED', '快照混入其他笔记评论');
+    if ((delta.length || found.size === 0) && options.onDelta) {
+      try { await options.onDelta(note, delta); }
+      catch (err) { if (err instanceof AppError) throw err; throw new AppError('STORAGE_ERROR', '新增评论保存失败，已停止采集'); }
+    }
+    checkCancelled(signal);
+    for (const comment of delta) {
+      if (found.size >= LIMITS.maxSessionComments) { truncated = true; break; }
+      found.set(comment.commentKey, comment);
+    }
+    addedCount += delta.length;
+    truncated ||= page.truncated || found.size >= LIMITS.maxSessionComments;
+    hasMoreLoaded ||= page.hasMoreLoaded;
+    endOfList ||= page.endOfList === true;
+  };
+  const snapshot = async (cursor: string | null, advance = false) => {
+    checkCancelled(signal);
+    return SnapshotPayload.parse(await ask(tabId, buildRequest('XHS_GET_SNAPSHOT', {
+      sessionId: first!.sessionId, expectedNoteKey, cursor, ...(advance ? { advance: true } : {}),
+    }), signal));
+  };
+  const drain = async (page: SnapshotPayload) => {
+    let restarts = 0;
+    for (;;) {
+      await accept(page);
+      if (!page.nextCursor) return;
+      try { page = await snapshot(page.nextCursor); }
+      catch (err) {
+        if (!options.autoLoad || !(err instanceof AppError) || err.code !== 'SNAPSHOT_EXPIRED' || ++restarts > 3) throw err;
+        // 追加缓冲使旧cursor失效：从头取，已经落库的条目按稳定键跳过。
+        page = await snapshot(null);
+      }
+    }
+  };
+  try {
+    first = SnapshotPayload.parse(await ask(tabId, buildRequest('XHS_START_SESSION', { expectedNoteKey })));
+    signal?.addEventListener('abort', abort, { once: true });
+    await drain(first);
+    await report(false);
+    let stopReason: CaptureProgress['stopReason'] = null;
+    const startedAt = Date.now();
+    let idleRounds = 0;
+    if (options.autoLoad) {
+      for (let round = 0; round < LIMITS.captureMaxRounds; round++) {
+        checkCancelled(signal);
+        if (truncated) { stopReason = 'limit'; break; }
+        if (endOfList) { stopReason = 'no_more'; break; }
+        if (Date.now() - startedAt >= LIMITS.captureMaxDurationMs) { stopReason = 'time_limit'; break; }
+        const before = found.size;
+        addedCount = 0;
+        await report(true);
+        await drain(await snapshot(null, true));
+        for (let sample = 0; sample < LIMITS.captureSamplesPerRound && !truncated && !endOfList; sample++) {
+          await (options.wait ?? waitForLoad)(LIMITS.capturePollMs, signal);
+          checkCancelled(signal);
+          await drain(await snapshot(null));
+          await report(true);
+        }
+        if (found.size === before) idleRounds += 1; else idleRounds = 0;
+        if (truncated) { stopReason = 'limit'; break; }
+        if (endOfList) { stopReason = 'no_more'; break; }
+        if (idleRounds >= LIMITS.captureIdleRounds) { stopReason = 'no_new'; break; }
+        if (round === LIMITS.captureMaxRounds - 1) stopReason = 'round_limit';
+      }
+    }
+    checkCancelled(signal);
+    await report(false, stopReason);
+    return { noteKey: expectedNoteKey, parserVersion: status.parserVersion, note: note!, comments: [...found.values()], truncated, hasMoreLoaded, stopReason };
+  } catch (err) {
+    await report(false, signal?.aborted ? 'cancelled' : 'error').catch(() => {});
+    if (signal?.aborted) throw new AppError('CANCELLED', '评论采集已取消');
+    throw err;
   } finally {
-    await ask(tabId, buildRequest('XHS_STOP_SESSION', { sessionId: first.sessionId })).catch(() => {});
+    signal?.removeEventListener('abort', abort);
+    await stop();
   }
-
-  if (!note) throw new AppError('PARSE_FAILED', '未能从页面解析出笔记内容');
-  return { noteKey: expectedNoteKey, parserVersion: status.parserVersion, note, comments, truncated, hasMoreLoaded };
 }

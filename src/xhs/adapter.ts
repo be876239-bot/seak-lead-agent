@@ -13,6 +13,8 @@ export type ParsedNote = {
 };
 
 export type ParsedComment = {
+  /** 只在解析内存使用，不进入消息、数据库或AI。 */
+  sourceElement: Element;
   elementId: string | null;
   platformCommentId: string | null;
   noteKey: string;
@@ -86,6 +88,7 @@ function parseItem(el: Element, noteKey: string, isSub: boolean, parentElementId
   const truncated = text.length > LIMITS.maxCommentChars;
   text = text.slice(0, LIMITS.maxCommentChars);
   return {
+    sourceElement: el,
     elementId: rawId,
     platformCommentId,
     noteKey,
