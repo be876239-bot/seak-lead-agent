@@ -26,6 +26,7 @@
   "dependencies": {
     "@mozilla/readability": "^0.6.0",
     "dexie": "^4.2.1",
+    "linkedom": "0.18.13",
     "papaparse": "^5.5.4",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",

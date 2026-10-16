@@ -1,4 +1,5 @@
 import type { ClassificationInput, ProfileInput } from '../privacy/ai-payload';
+import { redactText } from '../privacy/redact';
 
 export const PROFILE_PROMPT_VERSION = 'profile-v2';
 export const COMMENT_PROMPT_VERSION = 'comment-v2';
@@ -47,7 +48,6 @@ const COMMENT_FEW_SHOT: ChatMessage[] = [
     product: { name: null, category: '浙江省大学生网络安全知识挑战赛备考题库', summary: null, capabilities: ['历年真题练习', '按知识点练习'], targetAudience: [], needsServed: [], exclusions: ['不提供考试代答'], accessMethod: '邀请码解锁', price: null },
     note: { sourceId: 'n001', text: '浙江网络安全知识挑战赛备考题库分享' },
     items: [{ commentId: 'c001', sourceId: 'c001:text', text: '这个题库多少钱，在哪开通？', parent: null }],
-    idMap: [{ commentKey: 'example-1', tempId: 'c001' }],
   }) },
   { role: 'assistant', content: JSON.stringify({ results: [{
     commentId: 'c001', relevance: 'direct', need: 'explicit', purchaseIntent: 'price_or_access',
@@ -62,7 +62,9 @@ const COMMENT_FEW_SHOT: ChatMessage[] = [
 export function buildProfileMessages(input: ProfileInput): ChatMessage[] {
   return [
     { role: 'system', content: PROFILE_SYSTEM_PROMPT },
-    { role: 'user', content: JSON.stringify({ blocks: input.blocks, truncated: input.truncated }) },
+    { role: 'user', content: JSON.stringify({
+      blocks: input.blocks.map((b) => ({ id: b.id, text: redactText(b.text) })), truncated: input.truncated,
+    }) },
   ];
 }
 
@@ -70,7 +72,20 @@ export function buildCommentMessages(input: ClassificationInput): ChatMessage[] 
   return [
     { role: 'system', content: COMMENT_SYSTEM_PROMPT },
     ...COMMENT_FEW_SHOT,
-    { role: 'user', content: JSON.stringify(input) },
+    // idMap 仅供本地回填；在最终网络边界重新构造白名单，避免运行时额外字段外传。
+    { role: 'user', content: JSON.stringify({
+      product: {
+        name: input.product.name, category: input.product.category, summary: input.product.summary,
+        capabilities: input.product.capabilities, targetAudience: input.product.targetAudience,
+        needsServed: input.product.needsServed, exclusions: input.product.exclusions,
+        accessMethod: input.product.accessMethod, price: input.product.price,
+      },
+      note: { sourceId: input.note.sourceId, text: input.note.text },
+      items: input.items.map((item) => ({
+        commentId: item.commentId, sourceId: item.sourceId, text: item.text,
+        parent: item.parent ? { sourceId: item.parent.sourceId, text: item.parent.text } : null,
+      })),
+    }, (_key, value: unknown) => typeof value === 'string' ? redactText(value) : value) },
   ];
 }
 
@@ -82,8 +97,8 @@ export function appendRepair(
 ): ChatMessage[] {
   return [
     ...original,
-    { role: 'assistant', content: badOutput.slice(0, 8000) },
-    { role: 'user', content: `上一次的输出不符合要求：${errorSummary}
+    { role: 'assistant', content: redactText(badOutput).slice(0, 8000) },
+    { role: 'user', content: `上一次的输出不符合要求：${redactText(errorSummary)}
 请仅修正输出格式后重新返回完整 JSON，仍然只返回 JSON。` },
   ];
 }

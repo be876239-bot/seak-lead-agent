@@ -1,5 +1,7 @@
 # 觅客Agent 测试报告（T28 自动化回归 + T31 静态审查）
 
+**最新本轮结果见第 6 节：22 文件 / 216 项通过。第 1–5 节是此前执行者留下的历史报告，不代表本轮重跑全部真机矩阵。**
+
 日期：2026-10-16（UTC+8 夜间执行）。执行者：Qoder agent；命令均在项目根目录真实运行，输出原样摘录。
 
 ## 1. 环境与产物
@@ -64,3 +66,29 @@
 ## 5. 效果指标状态
 
 T30 真实评测（100–200 条人工标签）**尚未开始**，无 precision/recall 数据可报。32 条合成集只证明链路与规则回归，不代表真实中文效果。
+
+## 6. 2026-10-16 接手修复后的最新验证
+
+环境：Windows，Node v26.7.0，pnpm 10.33.0，WXT 0.21.4。起始基线与功能审计见 `takeover-audit-2026-10-16.md`。
+
+安装真实执行 `npx --yes pnpm@10.33.0 install --frozen-lockfile`。本机默认 pnpm 11.22.0 忽略 pnpm.overrides，尝试执行脚本时还会触发重新安装并因无 TTY 拒绝；没有同意清空 node_modules 或修改系统配置。改用已缓存 pnpm 10 离线执行，以下为最终代码上的实际结果：
+
+| 命令（前缀均为 `npx --offline --yes pnpm@10.33.0`） | 本轮结果 |
+|---|---|
+| typecheck | exit 0 |
+| lint | exit 0 |
+| test | **22 文件 / 216 项全部通过** |
+| build | exit 0，生产 chrome-mv3 构建 |
+| zip | exit 0，Chrome 开发包 347,797 B |
+| zip:edge | exit 0，包含 Edge 生产构建，开发包 347,797 B |
+| git diff --check | 通过；Git 仅提示 LF/CRLF 转换策略，未批量改行尾 |
+
+新增/扩展验证：实际 HTTP 请求白名单与脱敏；来源和模型输出落库脱敏；取消后迟到结果/过期锁/锁接管禁止提交；重试拒绝画像、配置、正文、旧摘要或锁冲突；无 DOM 后台静态解析及补读；产品静态取消；200/500 响应正文卡住的完整超时；卡片理由、不确定点、人工主页链接及 HTML/非法 URL 防护。关键故障已有先失败再通过记录；Mock/fixture 不计为真实模型效果。
+
+ZIP 均 11 个条目，可用 ZipFile 打开，含 `licenses/linkedom.txt`；无 `.env`、tests、eval、node_modules 条目；仅对包内 JS/JSON/HTML 做 `sk-[A-Za-z0-9]{16,}` 格式扫描，命中为 0。此扫描不是对所有秘密的完备证明。manifest 仍为 MV3，权限 `storage/sidePanel/scripting/activeTab`，content script 仅小红书域；未扩权。
+
+构建有已有 Zod 依赖注释的 Rollup annotation 警告（无构建失败）；依赖安装曾提示忽略 esbuild 生命周期脚本，但实际 prepare/build/zip 成功。LinkeDOM 增加后台包体积，最终总解压尺寸约 1.07 MB，未添加新权限。
+
+**展示验证与真实闭环分开**：本轮内置浏览器打开 localhost 合成 LeadExplanation 预览，观察截图中 320/390/560px 三种卡片宽度，理由、证据、不确定点和主页链接可见，未点小红书链接。组件测试使用 React SSR + DOM，用户真实数据未参与；临时预览已关闭。这只证明合成组件呈现，不能替代 T29 的扩展安装/权限/侧边栏交互。
+
+**尚未验证**：Edge/Chrome 实际加载新包、真实产品页面和搜索方向、真实小红书评论与跳转、真实模型质量、MV3 长队列/休眠恢复、真实用户价值。JEV/数值评分没有实现；不报告准确率。G3/T29/T30/T31 真机项不勾选，ZIP 标为待实测开发包。

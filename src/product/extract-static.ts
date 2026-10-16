@@ -1,5 +1,6 @@
 import { Readability } from '@mozilla/readability';
 import { LIMITS } from '../domain/limits';
+import { parseHtmlDocument } from './html-document';
 
 export type ProductSourceBlock = {
   id: string;
@@ -18,8 +19,7 @@ export type StaticExtractResult = {
 };
 
 function cleanDoc(html: string, baseUrl: string): Document | null {
-  const parser = new DOMParser();
-  const doc = parser.parseFromString(html, 'text/html');
+  const doc = parseHtmlDocument(html);
   if (doc.querySelector('parsererror') && !doc.body) return null;
   doc.querySelectorAll('script:not([type="application/ld+json"]),style,noscript,svg,iframe,video,audio,canvas').forEach((e) => e.remove());
   doc.querySelectorAll('a[href]').forEach((a) => {

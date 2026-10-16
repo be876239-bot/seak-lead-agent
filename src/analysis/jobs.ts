@@ -35,7 +35,7 @@ async function upsertJob(job: Job): Promise<void> {
 const TERMINAL: Job['status'][] = ['completed', 'partial', 'failed', 'cancelled', 'interrupted'];
 
 /** 采集阶段（尚未持锁）的可取消标记；进入 runner 后由锁句柄负责取消。 */
-const capturing = new Map<string, { cancelled: boolean }>();
+const capturing = new Map<string, { cancelled: boolean; controller?: AbortController }>();
 
 function baseJob(deps: RunnerDeps, id: string): Job {
   return {
@@ -69,10 +69,14 @@ export function registerAnalysisHandlers(): void {
     const { jobId, url, existingProductId } = req.payload;
     const deps = await makeDeps();
     await upsertJob({ ...baseJob(deps, jobId), productId: existingProductId ?? null });
+    const controller = new AbortController();
+    const flag = { cancelled: false, controller };
+    capturing.set(jobId, flag);
     emitJobLog(jobId, `任务开始（模型 ${deps.modelId}）；读取产品页 ${new URL(url).host}`);
     try {
-      const sources = await collectProductSources(url, jobId, undefined,
-        (jid, u) => readRenderedProduct(jid, u));
+      const sources = await collectProductSources(url, jobId, controller.signal,
+        (jid, u) => readRenderedProduct(jid, u, controller.signal));
+      if (flag.cancelled) throw new AppError('CANCELLED', '产品读取已取消');
       emitJobLog(jobId,
         `页面读取完成：${sources.blocks.length} 个来源块 / ${sources.totalChars} 字符`
         + `${sources.renderUsed ? '（含渲染兜底）' : ''}${sources.truncated ? '（已截断）' : ''}${sources.degraded ? '（降级读取）' : ''}`);
@@ -88,6 +92,8 @@ export function registerAnalysisHandlers(): void {
       failLog(jobId, err);
       await markFailedIfOpen(jobId, toErrorPayload(err).code);
       throw err;
+    } finally {
+      capturing.delete(jobId);
     }
   });
 
@@ -149,6 +155,7 @@ export function registerAnalysisHandlers(): void {
     const flag = capturing.get(jobId);
     if (flag) {
       flag.cancelled = true;
+      flag.controller?.abort();
       await analysisRepos.updateJob(jobId, { status: 'cancelled', errorCode: 'CANCELLED' });
       return { cancelling: true };
     }

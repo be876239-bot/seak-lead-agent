@@ -61,6 +61,14 @@ const mkComment = (over: Partial<Comment> = {}): Comment => ({
 });
 
 describe('AI 白名单 DTO', () => {
+  it('产品来源进入画像请求前脱敏，不修改原始输入', () => {
+    const blocks = [{ id: 's001', text: '在线题库，50 元。联系 13812345678 或 buyer@example.com' }];
+    const out = buildProfileInput(blocks);
+    expect(containsContact(out.blocks[0]!.text)).toBe(false);
+    expect(out.blocks[0]!.text).toContain('50 元');
+    expect(blocks[0]!.text).toContain('13812345678');
+  });
+
   it('DTO 不含昵称、主页、用户 ID、完整 URL 与 token', () => {
     const parent = mkComment({ commentKey: 'xhs:n1:p1', platformCommentId: 'p1', text: '亲测好用' });
     const child = mkComment({ commentKey: 'xhs:n1:c2', platformCommentId: 'c2', parentKey: parent.commentKey, text: '哪里买' });

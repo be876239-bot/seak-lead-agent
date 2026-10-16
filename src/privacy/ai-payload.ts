@@ -1,5 +1,6 @@
 import type { Claim, Comment, Note, ProductProfile } from '../domain/schemas';
 import { LIMITS } from '../domain/limits';
+import { redactText } from './redact';
 
 export type SourceBlockDto = { id: string; text: string };
 
@@ -29,10 +30,10 @@ export type ClassificationInput = {
   idMap: { commentKey: string; tempId: string }[];
 };
 
-const claimText = (c: Claim | undefined): string | null => c?.value ?? null;
+const claimText = (c: Claim | undefined): string | null => c?.value == null ? null : redactText(c.value);
 
 const claimList = (cs: Claim[], cap: number): string[] =>
-  cs.map((c) => c.value).filter((v): v is string => v !== null).slice(0, cap);
+  cs.map((c) => c.value).filter((v): v is string => v !== null).slice(0, cap).map(redactText);
 
 export function classificationProductTextLength(profile: ProductProfile): number {
   const productClaims: Claim[] = [
@@ -53,15 +54,16 @@ export function buildProfileInput(blocks: SourceBlockDto[]): ProfileInput {
   let total = 0;
   let truncated = false;
   for (const b of blocks) {
+    const text = redactText(b.text);
     const remaining = LIMITS.maxProductChars - total;
     if (remaining <= 0) { truncated = true; break; }
-    if (b.text.length > remaining) {
-      out.push({ id: b.id, text: b.text.slice(0, remaining) });
+    if (text.length > remaining) {
+      out.push({ id: b.id, text: text.slice(0, remaining) });
       truncated = true;
       break;
     }
-    out.push({ id: b.id, text: b.text });
-    total += b.text.length;
+    out.push({ id: b.id, text });
+    total += text.length;
   }
   return { blocks: out, truncated };
 }
@@ -76,7 +78,7 @@ export function buildClassificationInput(
   parentLookup: Map<string, Comment>,
   budgetChars: number,
 ): { input: ClassificationInput; used: number } {
-  const noteText = note.bodyExcerpt.slice(0, LIMITS.maxNoteChars);
+  const noteText = redactText(note.bodyExcerpt).slice(0, LIMITS.maxNoteChars);
   let used = classificationProductTextLength(profile) + noteText.length;
 
   const items: ClassificationItem[] = [];
@@ -99,10 +101,10 @@ export function buildClassificationInput(
           pid = `p${String(++parentSeq).padStart(3, '0')}`;
           parentTemp.set(c.parentKey, pid);
         }
-        parent = { sourceId: `${pid}:text`, text: p.text };
+        parent = { sourceId: `${pid}:text`, text: redactText(p.text) };
       }
     }
-    items.push({ commentId, sourceId: `${commentId}:text`, text: c.text, parent });
+    items.push({ commentId, sourceId: `${commentId}:text`, text: redactText(c.text), parent });
     idMap.push({ commentKey: c.commentKey, tempId: commentId });
   }
 

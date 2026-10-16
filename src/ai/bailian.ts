@@ -3,6 +3,7 @@ import { LIMITS } from '../domain/limits';
 import type { ClassificationInput, ProfileInput } from '../privacy/ai-payload';
 import { buildCommentMessages, buildProfileMessages, appendRepair, type ChatMessage } from './prompts';
 import type { AIProvider, AIResponse, RepairTurn } from './provider';
+import { redactText } from '../privacy/redact';
 
 export type BailianConfig = {
   apiKey: string;
@@ -39,9 +40,11 @@ export class BailianProvider implements AIProvider {
     signal.addEventListener('abort', onExternal, { once: true });
     const timer = setTimeout(() => controller.abort(), LIMITS.aiTimeoutMs);
     let res: Response;
+    let responseText: string;
     try {
       res = await fetch(`${this.cfg.baseUrl}/chat/completions`, {
         method: 'POST',
+        credentials: 'omit',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${this.cfg.apiKey}` },
         body: JSON.stringify({
           model: this.cfg.model,
@@ -51,13 +54,15 @@ export class BailianProvider implements AIProvider {
         }),
         signal: controller.signal,
       });
+      responseText = await res.text();
+      if (controller.signal.aborted) throw new DOMException('aborted', 'AbortError');
     } catch (err) {
       if (externalAbort) throw new AppError('CANCELLED', '任务已取消');
       if (err instanceof Error && err.name === 'AbortError') {
         throw new AppError('AI_TIMEOUT', `模型请求超时（>${LIMITS.aiTimeoutMs / 1000}s）`, true);
       }
       // 保留底层报错（如 Failed to fetch / net:: 错误名），否则真机上无法区分断网、权限失效与服务拒绝
-      const raw = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+      const raw = redactText((err instanceof Error ? `${err.name}: ${err.message}` : String(err)).replaceAll(this.cfg.apiKey, '【Key 已隐藏】'));
       throw new AppError('AI_TIMEOUT', `网络或模型服务连接失败（${raw.slice(0, 120)}），可稍后重试`, true);
     } finally {
       clearTimeout(timer);
@@ -65,7 +70,7 @@ export class BailianProvider implements AIProvider {
     }
 
     if (!res.ok) {
-      const detail = errorDetail(await res.text().catch(() => ''));
+      const detail = redactText(errorDetail(responseText.replaceAll(this.cfg.apiKey, '【Key 已隐藏】')));
       const tail = detail ? `：${detail}` : '';
       if (res.status === 401 || res.status === 403) throw new AppError('AI_AUTH', `模型鉴权失败，请检查 API Key 与模型权限（HTTP ${res.status}${tail}）`);
       if (res.status === 429) throw new AppError('AI_RATE_LIMIT', `模型限流，请稍后重试（HTTP 429${tail}）`, true);
@@ -76,13 +81,13 @@ export class BailianProvider implements AIProvider {
 
     let body: ChatCompletionBody;
     try {
-      body = await res.json() as ChatCompletionBody;
+      body = JSON.parse(responseText) as ChatCompletionBody;
     } catch {
       throw new AppError('AI_INVALID_OUTPUT', '模型返回体不是合法 JSON');
     }
     const content = body.choices?.[0]?.message?.content;
     if (typeof content !== 'string') {
-      throw new AppError('AI_INVALID_OUTPUT', `模型未返回内容${body.error?.message ? `：${body.error.message.slice(0, 200)}` : ''}`);
+      throw new AppError('AI_INVALID_OUTPUT', '模型未返回内容');
     }
     let value: unknown;
     try {

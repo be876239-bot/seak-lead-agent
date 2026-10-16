@@ -16,6 +16,7 @@ import { COMMENT_PROMPT_VERSION, PROFILE_PROMPT_VERSION } from '../ai/prompts';
 import { validateClassificationOutput, validateProfileOutput, type ValidatedResult } from '../ai/validate-result';
 import type { AIProvider, AIResponse, RepairTurn } from '../ai/provider';
 import type { Repositories } from '../storage/repositories';
+import { redactText } from '../privacy/redact';
 
 export type RunnerDeps = {
   repos: Repositories;
@@ -49,6 +50,11 @@ function ensureAppError(err: unknown): AppError {
 function abortedCode(handle: LockHandle): Code {
   const reason = handle.signal.reason as { code?: Code } | undefined;
   return reason?.code === 'CANCELLED' ? 'CANCELLED' : 'LOCK_HELD';
+}
+
+async function assertCanCommit(deps: RunnerDeps, handle: LockHandle): Promise<void> {
+  if (handle.signal.aborted) throw new AppError(abortedCode(handle), '任务已取消或租约已失效，丢弃迟到结果');
+  await deps.lock.assertOwned(handle);
 }
 
 /** 外显错误摘要：校验类报错正文含引文（评论原文），只保留"："前的说明段；其余 message 均为自撰文案可完整外显。 */
@@ -113,6 +119,13 @@ function safeJson(value: unknown): string {
   } catch {
     return String(value);
   }
+}
+
+function batchInputHash(product: Product, note: Note, comments: Comment[], parents: Map<string, Comment>): string {
+  const budget = classificationOverheadChars(product.profile, note)
+    + comments.reduce((n, c) => n + commentEstimate(c, parents), 0);
+  const { input } = buildClassificationInput(product.profile, note, comments, parents, budget);
+  return `input-v1:${hash64(JSON.stringify({ product: input.product, note: input.note, items: input.items }))}`;
 }
 
 /** 单批分类：可重试错误自动重试 1 次；格式无效修复 1 次；无静默无限重试。失败/无效尝试的用量即时落库。 */
@@ -217,7 +230,7 @@ async function executeRows(
     // 缓存复查：重试或并发任务可能已完成本批，不再调用 AI
     const existing = await deps.repos.existingCacheKeys(row.cacheKeys);
     if (row.cacheKeys.length > 0 && row.cacheKeys.every((k) => existing.has(k))) {
-      await deps.repos.commitBatch({ batchId: row.id, analyses: [], usage: [] });
+      await deps.repos.withOwnedLock(ctx.handle, () => deps.repos.commitBatch({ batchId: row.id, analyses: [], usage: [] }));
       row.status = 'completed';
       done += 1;
       outcome.completedItems += comments.length;
@@ -258,7 +271,14 @@ async function executeRows(
           createdAt: nowIso(),
         };
       });
-      await deps.repos.commitBatch({ batchId: row.id, analyses, usage: [successUsage] });
+      try {
+        await assertCanCommit(deps, ctx.handle);
+        await deps.repos.withOwnedLock(ctx.handle, () => deps.repos.commitBatch({ batchId: row.id, analyses, usage: [successUsage] }));
+      } catch (err) {
+        // 模型确已返回，丢弃结果也不能丢失供应商报告的用量。
+        await deps.repos.addUsage(successUsage);
+        throw err;
+      }
       row.status = 'completed';
       done += 1;
       outcome.completedItems += comments.length;
@@ -267,6 +287,11 @@ async function executeRows(
     } catch (err) {
       const e = ensureAppError(err);
       // 失败尝试的用量先落库（AI 可能已计费但未保存结果）
+      if (e.code === 'LOCK_HELD') {
+        await stopRemaining('interrupted');
+        outcome.firstError = 'LOCK_HELD';
+        break;
+      }
       if (e.code === 'CANCELLED') {
         row.status = 'interrupted';
         await deps.repos.updateBatch(row.id, { status: 'interrupted' });
@@ -344,7 +369,7 @@ export async function runCommentsJob(
     const rows: Batch[] = batches.map((b, i) => ({
       id: crypto.randomUUID(), jobId, index: i, status: 'pending',
       cacheKeys: b.cacheKeys, commentKeys: b.comments.map((c) => c.commentKey),
-      attemptCount: 0, inputHash: hash64(JSON.stringify(b.cacheKeys)),
+      attemptCount: 0, inputHash: batchInputHash(product, spec.note, b.comments, parentLookup),
       startedAt: null, completedAt: null, errorCode: null,
     }));
     if (rows.length) await deps.repos.addBatches(rows);
@@ -384,28 +409,40 @@ export async function retryCommentsJob(
   const product = await deps.repos.getProduct(job.productId!);
   const note = await deps.repos.getNote(job.noteKey!);
   if (!product || !note) throw new AppError('STORAGE_ERROR', '任务上下文缺失');
+  if (product.profileVersion !== job.profileVersion || deps.providerName !== job.provider
+    || deps.modelId !== job.modelId || job.promptVersion !== COMMENT_PROMPT_VERSION) {
+    throw new AppError('PAGE_CHANGED', '产品画像或模型配置已变化，请重新读取当前笔记；旧任务不会混用新配置重试');
+  }
 
   const rows = await deps.repos.batchesForJob(jobId);
   const retryable = rows.filter((r) => r.status === 'failed' || r.status === 'interrupted');
   if (!retryable.length) throw new AppError('UNKNOWN', '没有失败或中断的批次可重试');
   log?.(`重试计划：${retryable.length} 个失败或中断的批次将重新提交模型`);
-  for (const r of retryable) {
-    r.status = 'pending';
-    r.errorCode = null;
-    await deps.repos.updateBatch(r.id, { status: 'pending', errorCode: null });
-  }
-
   const handle = await deps.lock.acquire(LOCK_NAME, jobId);
   try {
-    await deps.repos.updateJob(jobId, {
-      status: 'analyzing', ownerId: handle.ownerId, generation: handle.generation, errorCode: null,
-    });
     const allComments = await deps.repos.getComments(rows.flatMap((r) => r.commentKeys));
     const parentKeys = allComments.map((c) => c.parentKey).filter((k): k is string => !!k);
     const parents = await deps.repos.getComments(parentKeys);
     const merged = [...allComments, ...parents];
     const { candidates, parentLookup } = buildCandidates(deps, product, note, merged);
     const candidateByCommentKey = new Map(candidates.map((c) => [c.comment.commentKey, c]));
+    for (const row of retryable) {
+      const comments = row.commentKeys.map((k) => parentLookup.get(k));
+      const currentKeys = row.commentKeys.map((k) => candidateByCommentKey.get(k)?.cacheKey);
+      if (comments.some((c) => !c) || JSON.stringify(currentKeys) !== JSON.stringify(row.cacheKeys)
+        || row.inputHash !== batchInputHash(product, note, comments as Comment[], parentLookup)) {
+        throw new AppError('PAGE_CHANGED', '评论或上下文已变化，或旧任务缺少输入校验记录；请重新读取当前笔记，已有缓存结果会复用');
+      }
+    }
+    // 全部校验通过且已持锁，才改变任务与批次状态。
+    for (const r of retryable) {
+      r.status = 'pending';
+      r.errorCode = null;
+      await deps.repos.updateBatch(r.id, { status: 'pending', errorCode: null });
+    }
+    await deps.repos.updateJob(jobId, {
+      status: 'analyzing', ownerId: handle.ownerId, generation: handle.generation, errorCode: null,
+    });
     const outcome = await executeRows(deps, { jobId, product, note, handle }, rows, parentLookup, candidateByCommentKey, onProgress, log);
     const fin = jobFinalStatus(outcome, rows);
     await deps.repos.updateJob(jobId, {
@@ -413,7 +450,8 @@ export async function retryCommentsJob(
       completedItems: job.completedItems + outcome.completedItems,
       failedItems: outcome.failedItems,
     });
-    return { ...job, status: fin.status, errorCode: fin.errorCode };
+    return { ...job, status: fin.status, errorCode: fin.errorCode,
+      completedItems: job.completedItems + outcome.completedItems, failedItems: outcome.failedItems };
   } finally {
     await deps.lock.release(handle);
   }
@@ -427,6 +465,8 @@ export async function runProfileGeneration(
     existingProductId?: string; jobId?: string; log?: (m: string) => void;
   },
 ): Promise<Product> {
+  // 在进入模型和业务数据库前统一脱敏；不改写调用方持有的原始输入。
+  const sourceBlocks = spec.blocks.map((b) => ({ ...b, text: redactText(b.text) }));
   const jobId = spec.jobId ?? crypto.randomUUID();
   const job: Job = {
     id: jobId, kind: 'product', status: 'created', ownerId: '', generation: 0,
@@ -443,7 +483,7 @@ export async function runProfileGeneration(
   try {
     handle = await deps.lock.acquire(LOCK_NAME, jobId);
     await deps.repos.updateJob(jobId, { status: 'analyzing', ownerId: handle.ownerId, generation: handle.generation });
-    const input: ProfileInput = buildProfileInput(spec.blocks.map((b) => ({ id: b.id, text: b.text })));
+    const input: ProfileInput = buildProfileInput(sourceBlocks.map((b) => ({ id: b.id, text: b.text })));
 
     let profile!: ProductProfile;
     let resp!: AIResponse;
@@ -493,19 +533,20 @@ export async function runProfileGeneration(
       inputTokens: resp.usage.inputTokens, outputTokens: resp.usage.outputTokens, durationMs: lastCallMs,
       providerRequestId: resp.providerRequestId ?? null,
     }));
-    const product = spec.existingProductId
-      ? await deps.repos.replaceProfile(spec.existingProductId, profile, spec.blocks)
-      : await deps.repos.createProduct({
+    await assertCanCommit(deps, handle);
+    const product = await deps.repos.withOwnedLock(handle, () => spec.existingProductId
+      ? deps.repos.replaceProfile(spec.existingProductId, profile, sourceBlocks)
+      : deps.repos.createProduct({
           inputUrl: spec.inputUrl, finalUrl: spec.finalUrl, profile,
-          sourceBlocks: spec.blocks, modelId: resp.model, promptVersion: PROFILE_PROMPT_VERSION,
-        });
+          sourceBlocks, modelId: resp.model, promptVersion: PROFILE_PROMPT_VERSION,
+        }));
     await deps.repos.updateJob(jobId, {
       status: 'completed', productId: product.id, profileVersion: product.profileVersion, completedItems: 1,
     });
     return product;
   } catch (err) {
     const e = ensureAppError(err);
-    const status: Job['status'] = e.code === 'CANCELLED' ? 'cancelled' : 'failed';
+    const status: Job['status'] = e.code === 'CANCELLED' ? 'cancelled' : e.code === 'LOCK_HELD' ? 'interrupted' : 'failed';
     await deps.repos.updateJob(jobId, { status, errorCode: e.code, failedItems: 1 });
     throw e;
   } finally {

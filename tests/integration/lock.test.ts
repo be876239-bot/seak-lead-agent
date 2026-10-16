@@ -75,6 +75,15 @@ describe('TaskLockManager（T19）', () => {
     await expect(m2.acquire(LOCK_NAME, crypto.randomUUID())).rejects.toMatchObject({ code: 'LOCK_HELD' });
   });
 
+  it('租约已过期但无人接管时，旧 owner 也不能复活租约提交', async () => {
+    const manager = new TaskLockManager(repos);
+    const handle = await manager.acquire(LOCK_NAME, crypto.randomUUID());
+    vi.clearAllTimers();
+    vi.setSystemTime(Date.now() + LOCK_TTL_MS + 1);
+    await expect(manager.assertOwned(handle)).rejects.toMatchObject({ code: 'LOCK_HELD' });
+    expect(handle.signal.aborted).toBe(true);
+  });
+
   it('续租丢失后 signal 被 abort 且禁止提交', async () => {
     const m1 = new TaskLockManager(repos);
     const handle = await m1.acquire(LOCK_NAME, crypto.randomUUID());

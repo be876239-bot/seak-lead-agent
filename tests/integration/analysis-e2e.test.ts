@@ -83,6 +83,106 @@ async function makeProduct(provider: MockProvider) {
 }
 
 describe('G2 mock 端到端闭环（产品→当前页→分析→保存→再运行去重）', () => {
+  it.each(['profile', 'model', 'comment', 'legacy', 'lock'] as const)('重试守卫拒绝 %s 变化，保留原批次且不调用模型', async (change) => {
+    const setup = new MockProvider({ profile: profileScript, classification: () => { throw new AppError('AI_TIMEOUT', '模拟失败'); } });
+    const product = await makeProduct(setup);
+    const snap = await captureFromFixture();
+    const job = await runCommentsJob(deps(setup), { productId: product.id, note: snap.note!, comments: snap.comments });
+    const rows = await repos.batchesForJob(job.id);
+    let calls = 0;
+    const provider = new MockProvider({ classification: (input) => { calls += 1; return goldClassification(input); } });
+    const retryDeps = deps(provider);
+    const other = new TaskLockManager(repos);
+    let blocker;
+    if (change === 'profile') await repos.replaceProfile(product.id, product.profile);
+    if (change === 'model') retryDeps.modelId = 'changed-model';
+    if (change === 'comment') await repos.putComments([{ ...snap.comments[0]!, text: '现在不需要了' }]);
+    if (change === 'legacy') await repos.updateBatch(rows[0]!.id, { inputHash: 'legacy-hash' });
+    if (change === 'lock') blocker = await other.acquire(LOCK_NAME, crypto.randomUUID());
+    const before = await repos.batchesForJob(job.id);
+    try {
+      await expect(retryCommentsJob(retryDeps, job.id)).rejects.toMatchObject({ code: change === 'lock' ? 'LOCK_HELD' : 'PAGE_CHANGED' });
+      expect(calls).toBe(0);
+      expect(await repos.batchesForJob(job.id)).toEqual(before);
+      expect((await repos.getJob(job.id))?.status).toBe('failed');
+    } finally {
+      if (blocker) await other.release(blocker);
+    }
+  });
+
+  it('产品来源与模型输出在请求及落库边界脱敏', async () => {
+    const provider = new MockProvider({
+      profile: (input) => {
+        expect(JSON.stringify(input)).not.toContain('13812345678');
+        return { ...profileScript(input), summary: { value: '联系 buyer@example.com', status: 'inferred', evidence: [] } };
+      },
+      classification: (input) => ({ results: goldClassification(input).results.map((r) => ({
+        ...r, reason: '联系 buyer@example.com', needSummary: '联系 13812345678', uncertainty: 'QQ 123456789',
+      })) }),
+    });
+    const product = await runProfileGeneration(deps(provider), {
+      inputUrl: 'https://example.com', finalUrl: 'https://example.com',
+      blocks: blocks.map((b) => ({ ...b, text: b.text + ' 电话 13812345678' })),
+    });
+    expect(JSON.stringify(product)).not.toContain('13812345678');
+    expect(JSON.stringify(product)).not.toContain('buyer@example.com');
+    const snap = await captureFromFixture();
+    const job = await runCommentsJob(deps(provider), { productId: product.id, note: snap.note!, comments: snap.comments });
+    expect(job.status).toBe('completed');
+    const saved = JSON.stringify(await db.analyses.toArray());
+    for (const text of ['13812345678', 'buyer@example.com', '123456789']) expect(saved).not.toContain(text);
+  });
+
+  it('取消后模型仍返回有效结果：丢弃迟到批次，保留真实用量，不写 Lead', async () => {
+    const provider = new MockProvider({ profile: profileScript });
+    const product = await makeProduct(provider);
+    const snap = await captureFromFixture();
+    const jobId = crypto.randomUUID();
+    provider.classifyComments = async (input) => {
+      await lock.cancel(lock.findHandleByJob(jobId)!);
+      return { value: goldClassification(input), model: 'mock-model', usage: { inputTokens: 12, outputTokens: 8 } };
+    };
+    const job = await runCommentsJob(deps(provider), { jobId, productId: product.id, note: snap.note!, comments: snap.comments });
+    expect(job.status).toBe('cancelled');
+    expect(await db.analyses.count()).toBe(0);
+    expect((await repos.batchesForJob(jobId)).every((b) => b.status === 'interrupted')).toBe(true);
+    expect(await db.usage.where('jobId').equals(jobId).toArray()).toMatchObject([
+      { inputTokens: 12, outputTokens: 8 },
+    ]);
+  });
+
+  it('模型返回前租约被接管：旧 owner 不提交，任务中断且可重试', async () => {
+    const provider = new MockProvider({ profile: profileScript });
+    const product = await makeProduct(provider);
+    const snap = await captureFromFixture();
+    provider.classifyComments = async (input) => {
+      await db.locks.update(LOCK_NAME, { ownerId: 'replacement-owner', generation: 999 });
+      return { value: goldClassification(input), model: 'mock-model', usage: { inputTokens: 12, outputTokens: 8 } };
+    };
+    const job = await runCommentsJob(deps(provider), { productId: product.id, note: snap.note!, comments: snap.comments });
+    expect(job.status).toBe('interrupted');
+    expect(job.errorCode).toBe('LOCK_HELD');
+    expect(await db.analyses.count()).toBe(0);
+  });
+
+  it('画像生成取消后仍返回：不创建产品也不覆盖已有画像', async () => {
+    const provider = new MockProvider({ profile: profileScript });
+    const product = await makeProduct(provider);
+    for (const existingProductId of [undefined, product.id]) {
+      const jobId = crypto.randomUUID();
+      provider.generateProfile = async (input) => {
+        await lock.cancel(lock.findHandleByJob(jobId)!);
+        return { value: profileScript(input), model: 'mock-model', usage: { inputTokens: 10, outputTokens: 5 } };
+      };
+      await expect(runProfileGeneration(deps(provider), {
+        jobId, existingProductId, inputUrl: 'https://example.com', finalUrl: 'https://example.com', blocks,
+      })).rejects.toMatchObject({ code: 'CANCELLED' });
+      expect((await repos.getJob(jobId))?.status).toBe('cancelled');
+    }
+    expect(await db.products.count()).toBe(1);
+    expect((await repos.getProduct(product.id))?.profileVersion).toBe(1);
+  });
+
   it('画像生成 + 真实 fixture 评论全量分析入库，重跑不再调用 AI', async () => {
     let classifyCalls = 0;
     const provider = new MockProvider({
@@ -260,20 +360,12 @@ describe('G2 mock 端到端闭环（产品→当前页→分析→保存→再�
     const provider = new MockProvider({ profile: profileScript, classification: goldClassification });
     const product = await makeProduct(provider);
     const snap = await captureFromFixture();
-    // 手工构造一个“上次进程遗留”的 running 任务上下文
-    const jobId = crypto.randomUUID();
-    await repos.createJob({
-      id: jobId, kind: 'comments', status: 'analyzing', ownerId: 'dead', generation: 0,
-      productId: product.id, profileVersion: product.profileVersion, tabId: null, noteKey: NOTE_KEY,
-      provider: 'mock', modelId: 'mock-model', promptVersion: 'comment-v1',
-      totalItems: 26, completedItems: 0, failedItems: 0,
-      createdAt: '2026-10-15T00:00:00Z', updatedAt: '2026-10-15T00:00:00Z', errorCode: null,
-    });
-    await repos.addBatches([{
-      id: crypto.randomUUID(), jobId, index: 0, status: 'running',
-      cacheKeys: [], commentKeys: snap.comments.slice(15).map((c) => c.commentKey),
-      attemptCount: 0, inputHash: 'deadbeef000000', startedAt: null, completedAt: null, errorCode: null,
-    }]);
+    // 使用真实 runner 生成有效快照和缓存键，再模拟后台退出遗留状态。
+    const failing = new MockProvider({ classification: () => { throw new AppError('AI_TIMEOUT', '模拟中断'); } });
+    const job = await runCommentsJob(deps(failing), { productId: product.id, note: snap.note!, comments: snap.comments.slice(15) });
+    const jobId = job.id;
+    await repos.updateJob(jobId, { status: 'analyzing' });
+    for (const row of await repos.batchesForJob(jobId)) await repos.updateBatch(row.id, { status: 'running' });
     const recovered = await lock.recoverInterrupted();
     expect(recovered).toEqual([jobId]);
     let seen = 0;

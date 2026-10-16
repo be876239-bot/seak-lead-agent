@@ -7,13 +7,14 @@ import { getNoteStatus } from '../../src/xhs/capture';
 import type { XhsStatusPayload } from '../../src/messaging/protocol';
 import {
   buildLeadGroups, GROUP_ORDER, GROUP_TITLES, intentShortCn, isJobActive, isRetryableJob,
-  jobPhaseLabel, safeExternalUrl,
+  jobPhaseLabel,
   type LeadView,
 } from '../../src/ui/logic';
 import { needsTargetBadge } from '../../src/domain/classification';
 import { getSelectedProductId, ui } from '../../src/ui/store';
 import { emitLocalJobLog } from '../../src/ui/joblog';
 import JobLogPanel from './JobLog';
+import LeadExplanation from '../../src/ui/LeadExplanation';
 
 const JOB_KEY = 'note.lastJobId';
 
@@ -27,7 +28,6 @@ function ItemCard({ view, product, onToggleHandled }: {
 }) {
   const stale = view.analysis.profileVersion !== product.profileVersion;
   const badge = needsTargetBadge(view.analysis.decision);
-  const url = safeExternalUrl(view.comment.profileUrl); // 不自动打开，也只给合法链接
   return (
     <div style={{ border: '1px solid #eee', borderRadius: 6, padding: 6, fontSize: 12 }}>
       <div style={{ color: '#666' }}>
@@ -45,9 +45,7 @@ function ItemCard({ view, product, onToggleHandled }: {
       {view.analysis.decision.evidence.length > 0 && (
         <div style={{ color: '#999' }}>证据：{view.analysis.decision.evidence.map((e) => e.quote).join(' / ')}</div>
       )}
-      {view.analysis.decision.uncertainty && (
-        <div style={{ color: '#b60' }}>不确定：{view.analysis.decision.uncertainty}</div>
-      )}
+      <LeadExplanation decision={view.analysis.decision} profileUrl={view.comment.profileUrl} />
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 4 }}>
         <span style={{ color: view.source === 'human' ? '#07c' : '#999' }}>
           {view.source === 'human' ? `人工纠正（模型原判 ${GROUP_TITLES[view.modelGroup]}）` : '模型结果'}
@@ -56,7 +54,6 @@ function ItemCard({ view, product, onToggleHandled }: {
         <label style={{ marginLeft: 'auto', display: 'flex', gap: 4, alignItems: 'center' }}>
           <input type="checkbox" checked={view.handled} onChange={() => onToggleHandled(view)} />已处理
         </label>
-        {url && <a href={url} target="_blank" rel="noreferrer">查看该评论者主页</a>}
       </div>
     </div>
   );

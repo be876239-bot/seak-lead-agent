@@ -3,6 +3,7 @@ import { AppError } from '../domain/errors';
 import { LIMITS } from '../domain/limits';
 import { parseProductUrl } from './url-policy';
 import { extractStatic, type ProductSourceBlock } from './extract-static';
+import { parseHtmlDocument } from './html-document';
 
 export type ProductSourcesResult = {
   inputUrl: string;
@@ -21,6 +22,7 @@ async function fetchHtmlLimited(url: string, signal?: AbortSignal): Promise<stri
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), LIMITS.staticFetchTimeoutMs);
   const onAbort = () => ctrl.abort();
+  if (signal?.aborted) onAbort();
   signal?.addEventListener('abort', onAbort, { once: true });
   try {
     const res = await fetch(url, {
@@ -57,7 +59,7 @@ async function fetchHtmlLimited(url: string, signal?: AbortSignal): Promise<stri
 }
 
 function findSupplementLinks(html: string, baseUrl: string): string[] {
-  const doc = new DOMParser().parseFromString(html, 'text/html');
+  const doc = parseHtmlDocument(html);
   doc.querySelectorAll('script,style').forEach((e) => e.remove());
   const out: string[] = [];
   const seen = new Set<string>();
@@ -100,6 +102,7 @@ const messageRenderReader: RenderReaderFn = async (jobId, url) => {
 export async function collectProductSources(
   rawUrl: string, jobId: string, signal?: AbortSignal, renderReader: RenderReaderFn = messageRenderReader,
 ): Promise<ProductSourcesResult> {
+  if (signal?.aborted) throw new AppError('CANCELLED', '产品读取已取消');
   const { url } = parseProductUrl(rawUrl);
   const granted = await browser.permissions.contains({ origins: [url.origin + '/*'] });
   if (!granted) throw new AppError('PERMISSION_DENIED', '请先在弹窗中授权该域名');
@@ -115,12 +118,14 @@ export async function collectProductSources(
   let needsRender = true;
   try {
     const html = await fetchHtmlLimited(finalUrl, signal);
+    if (signal?.aborted) throw new AppError('CANCELLED', '产品读取已取消');
     const r = extractStatic(html, finalUrl, fetchedAt);
     needsRender = r.needsRender;
     blocks = r.blocks;
     truncated = r.truncated;
     if (!needsRender) supplementBase = html;
   } catch (err) {
+    if (signal?.aborted) throw new AppError('CANCELLED', '产品读取已取消');
     if (err instanceof AppError && (err.code === 'CANCELLED' || err.code === 'PAGE_UNSUPPORTED')) throw err;
     needsRender = true;
   }
@@ -147,11 +152,13 @@ export async function collectProductSources(
           blocks.push({ ...b, id: `s${String(blocks.length + 1).padStart(3, '0')}` });
         }
       } catch {
+        if (signal?.aborted) throw new AppError('CANCELLED', '产品读取已取消');
         /* 补读失败不阻断，已有来源块 */
       }
     }
   }
 
+  if (signal?.aborted) throw new AppError('CANCELLED', '产品读取已取消');
   if (!blocks.length) {
     throw new AppError('PAGE_UNREACHABLE', '未能读取到产品页内容，请检查链接是否公开可访问' + (renderUsed ? '（可尝试把页面切到前台后重试）' : ''), true);
   }

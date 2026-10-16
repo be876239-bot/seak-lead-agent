@@ -11,6 +11,9 @@
 | Dexie | dexie/Dexie.js | Apache-2.0 | ddb6cb94a156837deea8bcef646cce0d5c8327c7 | IndexedDB 仓储与事务 |
 | Zod | colinhacks/zod | MIT | 680d19f7d1e042e55934209caeb79bc843b94f44 | schema 单一事实来源与输出校验 |
 | Papa Parse | mwatson/papa-parse | MIT | 安装时以 npm lockfile 版本为准 | CSV 导出转义 |
+| LinkeDOM | WebReflection/linkedom | ISC | npm 0.18.13，精确版本及完整性见 pnpm-lock.yaml | Background 无原生 DOMParser 时，复用 worker 入口离线解析产品 HTML；不执行页面脚本 |
+
+LinkeDOM 许可已于 2026-10-16 核对安装包 LICENSE（ISC）：Copyright (c) 2021, Andrea Giammarchi, @WebReflection。许可允许使用、复制、修改和分发，但须保留版权及许可声明；完整声明随依赖安装包保留。
 
 ## 局部参考/适配（MIT，复制时保留声明）
 

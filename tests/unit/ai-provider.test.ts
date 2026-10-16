@@ -4,6 +4,7 @@ import { BailianProvider, stripCodeFence } from '../../src/ai/bailian';
 import { MockProvider } from '../../src/ai/mock';
 import { COMMENT_SYSTEM_PROMPT, buildCommentMessages, buildProfileMessages } from '../../src/ai/prompts';
 import type { ClassificationInput } from '../../src/privacy/ai-payload';
+import { LIMITS } from '../../src/domain/limits';
 
 const cfg = { apiKey: 'sk-test-not-real', baseUrl: 'https://mock.local/v1', model: 'qwen3.8-flash' };
 
@@ -24,9 +25,31 @@ function classificationInput(): ClassificationInput {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 describe('BailianProvider 请求构造', () => {
+  it('实际请求只发送语义白名单，不发送本地映射或额外身份字段', async () => {
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ choices: [{ message: { content: '{}' } }] })));
+    vi.stubGlobal('fetch', fetchMock);
+    const input = classificationInput();
+    input.idMap = [{ commentKey: 'xhs:private-note:private-comment', tempId: 'c001' }];
+    const withExtra = { ...input, authorLocalKey: 'private-user', cookie: 'private-session' };
+    withExtra.product.summary = '联系 13812345678';
+    withExtra.items[0]!.text = '求题库，邮箱 buyer@example.com';
+    await new BailianProvider(cfg).classifyComments(withExtra, new AbortController().signal);
+    const body = JSON.parse((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body as string);
+    const serialized = JSON.stringify(body.messages);
+    for (const forbidden of ['idMap', 'commentKey', 'private-note', 'private-comment', 'private-user', 'private-session']) {
+      expect(serialized).not.toContain(forbidden);
+    }
+    const sent = JSON.parse(body.messages.at(-1).content);
+    expect(Object.keys(sent).sort()).toEqual(['items', 'note', 'product']);
+    expect(sent.items[0].commentId).toBe('c001');
+    expect(serialized).not.toContain('13812345678');
+    expect(serialized).not.toContain('buyer@example.com');
+  });
+
   it('发送 JSON 模式与非思考参数，携带 Key，不含 mock 回退', async () => {
     let captured: { url: string; headers: HeadersInit; body: string } | null = null;
     vi.stubGlobal('fetch', (url: string, init: { headers: HeadersInit; body: string }) => {
@@ -64,6 +87,20 @@ describe('BailianProvider 请求构造', () => {
 });
 
 describe('BailianProvider 错误映射', () => {
+  it.each([200, 500])('HTTP %s 已返回响应头但正文卡住，仍受完整请求超时控制', async (status) => {
+    vi.useFakeTimers();
+    vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
+      const stream = new ReadableStream({ start(controller) {
+        init.signal!.addEventListener('abort', () => controller.error(new DOMException('aborted', 'AbortError')), { once: true });
+      } });
+      return new Response(stream, { status });
+    });
+    const pending = new BailianProvider(cfg).generateProfile(profileInput, new AbortController().signal);
+    const assertion = expect(pending).rejects.toMatchObject({ code: 'AI_TIMEOUT' });
+    await vi.advanceTimersByTimeAsync(LIMITS.aiTimeoutMs + 1);
+    await assertion;
+  });
+
   const cases: [number, string, boolean][] = [
     [401, 'AI_AUTH', false],
     [403, 'AI_AUTH', false],

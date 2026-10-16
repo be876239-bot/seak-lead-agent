@@ -10,6 +10,7 @@ import {
 } from '../../src/ui/logic';
 import { needsTargetBadge } from '../../src/domain/classification';
 import { getSelectedProductId, ui } from '../../src/ui/store';
+import LeadExplanation from '../../src/ui/LeadExplanation';
 
 type Filters = { group: Group | 'all'; handled: 'all' | 'handled' | 'unhandled'; query: string };
 
@@ -180,6 +181,7 @@ export default function Leads() {
             {v.analysis.decision.evidence.length > 0 && (
               <div style={{ color: '#999', fontSize: 12 }}>证据：{v.analysis.decision.evidence.map((e) => e.quote).join(' / ')}</div>
             )}
+            <LeadExplanation decision={v.analysis.decision} profileUrl={v.comment.profileUrl} />
             {v.correction?.note && <div style={{ color: '#07c', fontSize: 12 }}>纠正备注：{v.correction.note}</div>}
             <div style={{ display: 'flex', gap: 10, alignItems: 'center', fontSize: 12 }}>
               <label style={{ display: 'flex', gap: 4, alignItems: 'center' }}>

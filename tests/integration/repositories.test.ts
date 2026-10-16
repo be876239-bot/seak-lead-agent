@@ -44,6 +44,24 @@ describe('repositories', () => {
     repo = new Repositories(db);
   });
 
+  it('结果写入事务拒绝过期或已取消的租约', async () => {
+    const ac = new AbortController();
+    const handle = { name: 'test-lock', ownerId: 'owner', generation: 1, signal: ac.signal };
+    await db.locks.put({
+      name: handle.name, ownerId: handle.ownerId, generation: 1, jobId: crypto.randomUUID(),
+      leaseExpiresAt: new Date(Date.now() - 1000).toISOString(),
+    });
+    let writes = 0;
+    const write = async () => { writes += 1; return true; };
+    await expect(repo.withOwnedLock(handle, write)).rejects.toMatchObject({ code: 'LOCK_HELD' });
+    expect(writes).toBe(0);
+    await db.locks.update(handle.name, { leaseExpiresAt: new Date(Date.now() + 60_000).toISOString() });
+    expect(await repo.withOwnedLock(handle, write)).toBe(true);
+    ac.abort();
+    await expect(repo.withOwnedLock(handle, write)).rejects.toMatchObject({ code: 'CANCELLED' });
+    expect(writes).toBe(1);
+  });
+
   it('重复 cacheKey 不重复存储', async () => {
     const a = analysis();
     expect(await repo.insertAnalysisIfAbsent(a)).toBe(true);

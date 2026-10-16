@@ -1,5 +1,13 @@
 # 决策记录
 
+## D008 2026-10-16 接手修复：数据边界与结果提交
+- 评论模型请求最终组装时显式提取 product/note/items，idMap 只留本地；模拟 few-shot 同样移除本地映射。产品来源、语义 DTO、修复请求和模型输出复用 redactText；昵称原文保留规则 D006 不变。
+- 此次仅修复传输白名单和脱敏，分类系统指令、语义字段、规则及模型输出协议未改变；保留 comment-v2/profile-v2 和既有缓存，避免隐私修复导致全部历史结果重新计费。后续真正修改提示词语义仍必须升级版本。旧数据库不会在此轮批量迁移或删除。
+- 取消/锁接管后的模型结果不得提交；结果写入与租约检查置于同一个 IndexedDB 事务，过期锁不可复活续租。供应商已回报的 token 仍记用量。
+- Background 没有原生 DOMParser 时使用精确依赖 linkedom 0.18.13 的 worker 入口离线解析 HTML，保留静态优先与 Readability，不新增 offscreen 权限、不执行网页脚本。ISC 许可随 public/licenses/linkedom.txt 打包。
+- 不新增 JEV、数值评分、自动搜索或其他平台。真实浏览器和模型质量验收仍需独立完成。
+- 后续同轮增量：重试前校验画像/配置与 input-v1 请求摘要，校验失败或锁冲突不修改原批次；旧任务没有可验证摘要时引导重新读取笔记，保留已完成缓存。完整 AI 响应体受超时与取消控制，静态产品读取取消向后台传递；Lead 卡片增加理由、不确定点和人工主页跳转。合成卡片渲染不计入 T29/T30。
+
 ## D001 2026-10-15 百炼模型连通验证（第 0 步）
 - `.env` 保存 `DASHSCOPE_API_KEY`（gitignore 排除，不入库、不进日志）。
 - 实测 `POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions`，model=`qwen3.8-flash`，`response_format:{type:json_object}`、`enable_thinking:false`（HTTP 顶层参数）均被接受；返回标准 `usage.prompt_tokens/completion_tokens/total_tokens`。request_id 示例：chatcmpl-417c7092-9314-9cd7-a6a7-375b775454af。

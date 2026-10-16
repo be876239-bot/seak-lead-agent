@@ -14,6 +14,24 @@ function upsertProfileClaims(profile: ProductProfile, edited: Partial<ProductPro
 export class Repositories {
   constructor(private db: SeekLeadDb) {}
 
+  /** 在写结果的同一事务中检查租约，防止检查后被其他面板接管。 */
+  async withOwnedLock<T>(
+    handle: { name: string; ownerId: string; generation: number; signal: AbortSignal },
+    write: () => Promise<T>,
+  ): Promise<T> {
+    return this.db.transaction('rw', [this.db.locks, this.db.products, this.db.analyses, this.db.usage, this.db.batches], async () => {
+      if (handle.signal.aborted) {
+        const reason = handle.signal.reason;
+        throw reason instanceof AppError ? reason : new AppError('CANCELLED', '任务已取消');
+      }
+      const lease = await this.db.locks.get(handle.name);
+      if (!lease || lease.ownerId !== handle.ownerId || lease.generation !== handle.generation || !(Date.parse(lease.leaseExpiresAt) > Date.now())) {
+        throw new AppError('LOCK_HELD', '任务租约已失效，禁止提交');
+      }
+      return write();
+    });
+  }
+
   // ---- products ----
   async createProduct(input: {
     inputUrl: string; finalUrl: string; profile: ProductProfile;
@@ -235,7 +253,8 @@ export class Repositories {
   async renewLock(name: string, ownerId: string, generation: number, ttlMs: number): Promise<boolean> {
     return this.db.transaction('rw', this.db.locks, async () => {
       const existing = await this.db.locks.get(name);
-      if (!existing || existing.ownerId !== ownerId || existing.generation !== generation) return false;
+      if (!existing || existing.ownerId !== ownerId || existing.generation !== generation
+        || !(Date.parse(existing.leaseExpiresAt) > Date.now())) return false;
       await this.db.locks.put({
         ...existing,
         leaseExpiresAt: new Date(Date.now() + ttlMs).toISOString(),

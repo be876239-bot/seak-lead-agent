@@ -6,6 +6,7 @@ import {
   type Decision,
 } from '../domain/schemas';
 import type { ClassificationInput } from '../privacy/ai-payload';
+import { redactText } from '../privacy/redact';
 
 /**
  * 引文允许标准省略号（… / ...）分节：拆出的每个片段必须是来源块中按序出现的连续原文，
@@ -62,6 +63,12 @@ export function validateProfileOutput(value: unknown, blocks: readonly { id: str
       else if (!isNormalizedSubstring(ev.quote, text)) fail(`证据引文不是来源块原文连续段（可用“…”按序省略中间内容）：${ev.sourceId}「${ev.quote.slice(0, 80)}」`);
     }
   }
+  // 输出字段同样是非可信文本；保留结构并在持久化前再次脱敏。
+  for (const c of claims) {
+    if (c.value !== null) c.value = redactText(c.value);
+    for (const ev of c.evidence) ev.quote = redactText(ev.quote);
+  }
+  profile.searchSuggestions = profile.searchSuggestions.map(redactText);
   return profile;
 }
 
@@ -101,6 +108,10 @@ export function validateClassificationOutput(value: unknown, input: Classificati
       if (!isNormalizedSubstring(ev.quote, text)) fail(`commentId ${decision.commentId} 引文不是原文连续段（可用“…”按序省略中间内容）：${ev.sourceId}「${ev.quote.slice(0, 80)}」`);
       if (ev.sourceId === `${item.commentId}:text`) hasSelfEvidence = true;
     }
+    decision.needSummary = redactText(decision.needSummary);
+    decision.reason = redactText(decision.reason);
+    decision.uncertainty = decision.uncertainty === null ? null : redactText(decision.uncertainty);
+    for (const ev of decision.evidence) ev.quote = redactText(ev.quote);
     out.push({ decision, hasSelfEvidence });
   }
 
