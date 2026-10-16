@@ -9,7 +9,7 @@ import {
   type LeadView,
 } from '../../src/ui/logic';
 import { needsTargetBadge } from '../../src/domain/classification';
-import { getSelectedProductId, ui } from '../../src/ui/store';
+import { getLeadComments, getSelectedProductId, ui } from '../../src/ui/store';
 import LeadExplanation from '../../src/ui/LeadExplanation';
 
 type Filters = { group: Group | 'all'; handled: 'all' | 'handled' | 'unhandled'; query: string };
@@ -45,7 +45,7 @@ export default function Leads() {
         ui.analysesForProduct(productId), ui.feedbackForProduct(productId), ui.leadStatesForProduct(productId),
       ]);
       const commentKeys = [...new Set(analyses.map((a) => a.commentKey))];
-      const comments = await ui.getComments(commentKeys);
+      const comments = await getLeadComments(commentKeys);
       const built = buildLeadGroups({ analyses, comments, feedback, leadStates: states });
       setViews(built);
       const noteKeys = [...new Set(comments.map((c) => c.noteKey))];
@@ -96,7 +96,7 @@ export default function Leads() {
     const [analyses, feedback, states] = await Promise.all([
       ui.analysesForProduct(productId), ui.feedbackForProduct(productId), ui.leadStatesForProduct(productId),
     ]);
-    const comments = await ui.getComments([...new Set(analyses.map((a) => a.commentKey))]);
+    const comments = await getLeadComments([...new Set(analyses.map((a) => a.commentKey))]);
     setViews(buildLeadGroups({ analyses, comments, feedback, leadStates: states }));
   };
 
@@ -169,7 +169,7 @@ export default function Leads() {
               {v.comment.authorDisplayName ?? '（页面无昵称）'}
               {v.comment.locationText ? ` · ${v.comment.locationText}` : ''}
             </div>
-            <div>{v.comment.text}</div>
+            {!v.comment.parentKey && <div>{v.comment.text}</div>}
             <div><b>{v.analysis.decision.needSummary}</b>
               <span style={{ color: '#777', marginLeft: 6 }}>
                 意向：{intentShortCn(v.analysis.decision)} · 匹配：{PRODUCT_FIT_CN[v.analysis.decision.productFit]}
@@ -181,7 +181,7 @@ export default function Leads() {
             {v.analysis.decision.evidence.length > 0 && (
               <div style={{ color: '#999', fontSize: 12 }}>证据：{v.analysis.decision.evidence.map((e) => e.quote).join(' / ')}</div>
             )}
-            <LeadExplanation decision={v.analysis.decision} profileUrl={v.comment.profileUrl} />
+            <LeadExplanation decision={v.analysis.decision} profileUrl={v.comment.profileUrl} comment={v.comment} parentComment={v.parentComment} />
             {v.correction?.note && <div style={{ color: '#07c', fontSize: 12 }}>纠正备注：{v.correction.note}</div>}
             <div style={{ display: 'flex', gap: 10, alignItems: 'center', fontSize: 12 }}>
               <label style={{ display: 'flex', gap: 4, alignItems: 'center' }}>

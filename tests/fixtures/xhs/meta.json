@@ -41,6 +41,7 @@
     "note-detail-no-comments.html": { "kind": "note-modal", "parents": 0, "subs": 0, "noComments": true },
     "page-overlay-with-feed.html": { "kind": "note-modal + feed-behind", "parents": 10, "subs": 18, "feedCards": 30, "purpose": "X01 隔离：弹层内解析，不混入背后信息流" },
     "feed-only.html": { "kind": "feed-no-modal", "feedCards": 30, "purpose": "detectPage 应返回 unsupported" },
-    "error-page-404.html": { "kind": "error", "purpose": "无效笔记 404，detectPage 应返回 unsupported/blocked，不虚构评论" }
+    "error-page-404.html": { "kind": "error", "purpose": "无效笔记 404，detectPage 应返回 unsupported/blocked，不虚构评论" },
+    "nested-replies.html": {"kind": "synthetic-fixture", "source": "手写合成；仅容器结构沿用历史真实脱敏fixture，不是真实页面快照", "parents": 2, "subs": 0, "unexpandedShowMore": 2, "purpose": "展开/延迟/再展开/虚拟移除及父关系合成测试"}
   }
 }

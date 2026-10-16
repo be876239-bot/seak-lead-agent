@@ -22,6 +22,7 @@ export const STATUS_LABELS: Record<Claim['status'], string> = {
 
 export type LeadView = {
   comment: Comment;
+  parentComment?: Comment | null;
   analysis: Analysis;
   /** 当前生效分组：人工纠正优先于模型结果。 */
   group: Group;
@@ -55,7 +56,7 @@ export function buildLeadGroups(input: {
     const ruleGroup: Group = a.ruleVersion === RULE_VERSION ? a.group : groupDecision(a.decision, true);
     const group: Group = correction ? correction.correctedGroup! : ruleGroup;
     out[group].push({
-      comment, analysis: a, group, modelGroup: ruleGroup,
+      comment, parentComment:comment.parentKey && byComment.get(comment.parentKey)?.noteKey===comment.noteKey?byComment.get(comment.parentKey)??null:null, analysis: a, group, modelGroup: ruleGroup,
       source: correction ? 'human' : 'model', correction,
       handled: handledKeys.has(`${a.productId}:${a.commentKey}`),
     });

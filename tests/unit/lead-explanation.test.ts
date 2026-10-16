@@ -27,3 +27,11 @@ it.each([null, 'javascript:alert(1)', 'file:///private'])('无效主页 %s 不�
   document.body.innerHTML = renderToStaticMarkup(createElement(LeadExplanation, { decision, profileUrl }));
   expect(document.querySelector('a')).toBeNull();
 });
+
+it('回复Lead展示来源、父评论和用户回复，结构缺失时明确提示，不执行HTML',()=>{
+ const comment={parentKey:'parent',text:'公司商用怎么收费？'} as import('../../src/domain/schemas').Comment;
+ const parentComment={commentKey:'parent',text:'这个产品好用吗？<script>unsafe()</script>'} as import('../../src/domain/schemas').Comment;
+ document.body.innerHTML=renderToStaticMarkup(createElement(LeadExplanation,{decision,comment,parentComment}));
+ expect(document.body.textContent).toContain('来源类型：回复');expect(document.body.textContent).toContain('父评论：');expect(document.body.textContent).toContain(parentComment.text);expect(document.body.textContent).toContain('用户回复：');expect(document.querySelector('script')).toBeNull();
+ document.body.innerHTML=renderToStaticMarkup(createElement(LeadExplanation,{decision,comment}));expect(document.body.textContent).toContain('父评论文字未采集');
+});

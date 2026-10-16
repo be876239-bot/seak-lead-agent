@@ -128,3 +128,11 @@ Edge ZIP可正常读取，11项资源；包内JS/JSON/HTML与edge-mv3构建逐�
 Edge/Chrome ZIP各358190 B、11项，SHA256 d7e875db7e5937ffd87eda7b22a764c5fdb885e2d0da4df72a21a08b778c2122；逐项匹配构建，未包含.env/tests/eval/node_modules/.scratch，Key格式扫描0命中，manifest权限未增加。AI Prompt/分组/缓存键/批次/数据库表结构未改；runner仅新增外部signal桥接既有取消锁，jobs表仅新增可选任务元数据。
 
 **真实小红书：NOT VERIFIED。** Edge标签连接超时，未执行真实任务；用户明确要求先交付代码与验收步骤。未证明账号不会受限制、所有风控提示都可识别或评论已采全。历史T29/T30不勾选。
+
+## 9. 2026-10-16 一级评论+回复（最新，D011）
+
+起始HEAD 53344f2；先只读审计确认adapter/parentKey/AI parent已有支持，主要缺口是没有展开折叠回复、无父ID和父DOM移除时关联不足。修复为白名单控件串行展开→等待→增量落库→再展开，500为一级+回复总数；10秒无响应、100次展开和原有取消/时间/轮次/平台限制均有停止状态。
+
+最终29文件/289项通过，比基线新增16项：xhs-replies 12项、父评论补查2项、分类计数与Lead上下文各1项。typecheck/lint通过。Edge/Chrome ZIP各360072 B、11项，SHA256 a94ec0cb678ce91b9fc172122f46116ed04860e4fda14fa95e2f6b1865b0ed94；逐项与构建一致，无测试/环境文件，Key模式扫描0命中，manifest权限不变。AI Prompt、分组、AI payload、runner和数据库表版本未改，无迁移。
+
+真实小红书NOT VERIFIED：Edge绑定返回Debugger unattached，未执行真实展开/采集；用户明确选择先交付代码与验收步骤。仅合成UI组件渲染并截图，不算真实平台通过。完整审计、A–K映射、操作白名单、数据模型、真实验收步骤与限制见 `replies-capture-2026-10-16.md`。

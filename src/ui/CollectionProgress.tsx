@@ -14,7 +14,8 @@ export default function CollectionProgressView({ progress }: { progress: Capture
   return (
     <div role="status" style={{ fontSize: 12, padding: 8, background: '#f0f7ff', overflowWrap: 'anywhere' }}>
       <div>已发现 {progress.discoveredCount} 条 · 本轮新增 {progress.addedCount} 条</div>
-      <div>{progress.loading ? '正在滚动/等待网页加载更多评论…' : '当前未在加载'}</div>
+      {progress.topLevelCount!==undefined && progress.replyCount!==undefined && <div>一级评论：{progress.topLevelCount} · 回复：{progress.replyCount}</div>}
+      <div>{progress.loadingReplies && progress.loading ? '正在加载回复…' : progress.loading ? '正在滚动/等待网页加载更多评论…' : '当前未在加载'}</div>
       <div>{progress.stopReason ? CAPTURE_STOP_LABELS[progress.stopReason] : '是否还有更多评论：尚未确认'}</div>
     </div>
   );

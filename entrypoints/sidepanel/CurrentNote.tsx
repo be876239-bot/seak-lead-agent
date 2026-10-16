@@ -35,7 +35,7 @@ function ItemCard({ view, product, onToggleHandled }: {
         {view.comment.authorDisplayName ?? '（页面无昵称）'}
         {view.comment.locationText ? ` · ${view.comment.locationText}` : ''}
       </div>
-      <div style={{ color: '#444' }}>{view.comment.text}</div>
+      {!view.comment.parentKey && <div style={{ color: '#444' }}>{view.comment.text}</div>}
       <div style={{ marginTop: 4 }}>
         <b>{view.analysis.decision.needSummary}</b>
         <span style={{ color: '#777', marginLeft: 6 }}>意向：{intentShortCn(view.analysis.decision)}</span>
@@ -46,7 +46,7 @@ function ItemCard({ view, product, onToggleHandled }: {
       {view.analysis.decision.evidence.length > 0 && (
         <div style={{ color: '#999' }}>证据：{view.analysis.decision.evidence.map((e) => e.quote).join(' / ')}</div>
       )}
-      <LeadExplanation decision={view.analysis.decision} profileUrl={view.comment.profileUrl} />
+      <LeadExplanation decision={view.analysis.decision} profileUrl={view.comment.profileUrl} comment={view.comment} parentComment={view.parentComment} />
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 4 }}>
         <span style={{ color: view.source === 'human' ? '#07c' : '#999' }}>
           {view.source === 'human' ? `人工纠正（模型原判 ${GROUP_TITLES[view.modelGroup]}）` : '模型结果'}

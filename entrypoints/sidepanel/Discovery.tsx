@@ -1,3 +1,4 @@
+import CollectionProgressView from '../../src/ui/CollectionProgress';
 import { useEffect, useState } from 'react';
 import { browser } from 'wxt/browser';
 import type { Job, Product } from '../../src/domain/schemas';
@@ -59,6 +60,7 @@ export default function Discovery() {
       <p>当前方向：{state.direction}</p>
       <p>当前帖子：第 {Math.min(state.index+1,state.total)} / {state.total}</p>
       <p>评论：累计已读取 {state.comments} 条（当前帖 {state.currentComments} 条）</p>
+      {job?.collection && job.collection.discoveredCount===state.currentComments && <div><b>本帖评论采集</b><CollectionProgressView progress={job.collection}/></div>}
       <p>Lead：发现 {state.leads} 条（高意向或有需求，在线索页查看）</p>
       <p>状态：{state.phase}</p>{state.reason && <p>{state.reason}</p>}
       {job?.status==='interrupted'&&state.status==='running'&&<p>后台已中断，未自动恢复。请停止旧任务后重新启动；本地结果保留。</p>}

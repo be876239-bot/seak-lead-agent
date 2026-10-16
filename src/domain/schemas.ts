@@ -148,6 +148,9 @@ export const JobKind = z.enum(['product', 'comments', 'discovery']);
 export const CaptureProgressSchema = z.object({
   discoveredCount: z.number().int().min(0).max(LIMITS.maxSessionComments),
   addedCount: z.number().int().min(0).max(LIMITS.maxSessionComments),
+  topLevelCount: z.number().int().min(0).max(LIMITS.maxSessionComments).optional(),
+  replyCount: z.number().int().min(0).max(LIMITS.maxSessionComments).optional(),
+  loadingReplies: z.boolean().optional(),
   loading: z.boolean(),
   stopReason: z.enum(['no_new', 'no_more', 'limit', 'time_limit', 'round_limit', 'cancelled', 'error']).nullable(),
 });

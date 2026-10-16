@@ -37,7 +37,7 @@ async function launch(spec:{jobId:string;productId:string;tabId:number;direction
             assertRunning(signal);if(note.noteKey!==expected || comments.some(c=>c.noteKey!==expected))throw new AppError('PAGE_CHANGED','评论与任务笔记不一致，拒绝落库');
             await analysisRepos.saveCaptureDelta(childId,note,comments,signal);
           },
-          onProgress:async collection=>{if(signal.aborted)return;await analysisRepos.updateJob(childId,{collection});progress(collection.discoveredCount,0,`${collection.loading?'正在加载评论':'正在累计评论'}……本轮新增 ${collection.addedCount} 条`);},
+          onProgress:async collection=>{if(signal.aborted)return;await analysisRepos.updateJob(childId,{collection});await analysisRepos.updateJob(jobId,{collection});progress(collection.discoveredCount,0,`${collection.loadingReplies?'正在加载回复':collection.loading?'正在加载评论':'正在累计评论'}……本轮新增 ${collection.addedCount} 条`);},
         });
         assertRunning(signal);if(snap.noteKey!==expected)throw new AppError('PAGE_CHANGED','采集笔记不一致');
         if(snap.stopReason==='time_limit'||snap.stopReason==='round_limit')throw new AppError('PARSE_FAILED','评论加载达到时间/轮次上限，请人工检查后继续');

@@ -20,3 +20,8 @@ it('无新增停止不能渲染成已采集全部', () => {
   expect(document.body.textContent).toContain('无法确认是否全部');
   expect(document.body.textContent).not.toContain('已采集全部');
 });
+
+it('分类计数和回复加载状态可见，旧任务缺计数不伪造为零回复',()=>{
+ document.body.innerHTML=renderToStaticMarkup(createElement(CollectionProgressView,{progress:{discoveredCount:137,addedCount:2,loading:true,stopReason:null,topLevelCount:82,replyCount:55,loadingReplies:true}}));
+ expect(document.body.textContent).toContain('一级评论：82');expect(document.body.textContent).toContain('回复：55');expect(document.body.textContent).toContain('正在加载回复');
+});

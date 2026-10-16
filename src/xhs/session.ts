@@ -9,7 +9,7 @@ import {
   type XhsStatusPayload,
   type SnapshotPayload,
 } from '../messaging/protocol';
-import { detectPage, parseLoadedComments, parseNote, type ParsedComment } from './adapter';
+import { detectPage, parseLoadedComments, parseNote, replyExpandControls, type ParsedComment } from './adapter';
 import { SEL, PARSER_VERSION } from './selectors';
 
 export type EndReason = 'stopped' | 'page_changed' | 'blocked' | 'heartbeat';
@@ -41,6 +41,10 @@ class ActiveSession {
   elementKey = new Map<string, string>();
   elementOrdinal = new Map<string, number>();
   weakElements = new WeakMap<Element, { signature: string; ordinal: number }>();
+  sourceKeys = new WeakMap<Element,string>();
+  replyLoad: {parentKey:string;before:number;startedAt:number;lastCount:number;changedAt:number} | null = null;
+  replyActions = 0;
+  replyRequests = new Set<string>();
   version = 0;
   limitReached = false;
   lastActivityAt: number;
@@ -140,11 +144,13 @@ export class XhsSessionManager {
   private snapshot(sessionId: string, expectedNoteKey: string, cursor: string | null, advance = false): SnapshotPayload {
     const session = this.assertLive(sessionId, expectedNoteKey);
     if (!cursor) this.ingest(true);
+    this.settleReplyLoad();
     if (advance && !session.limitReached) {
       if (cursor) throw new AppError('SNAPSHOT_EXPIRED', '分页期间不能滚动加载');
-      this.scrollComments();
+      if(!this.advanceReplies()) this.scrollComments();
       this.assertLive(sessionId, expectedNoteKey);
       this.ingest(true);
+      this.settleReplyLoad();
     }
     let offset = 0;
     if (cursor) {
@@ -161,6 +167,35 @@ export class XhsSessionManager {
       offset = parsed.offset;
     }
     return this.buildChunk(offset);
+  }
+
+  private settleReplyLoad(): void {
+    const session=this.session!;const pending=session.replyLoad;if(!pending)return;
+    const count=session.buffer.filter(c=>c.parentKey===pending.parentKey).length;
+    if(count!==pending.lastCount){pending.lastCount=count;pending.changedAt=this.now();}
+    if(count>pending.before && this.now()-pending.changedAt>=LIMITS.replyQuietMs){session.replyLoad=null;return;}
+    if(count===pending.before && this.now()-pending.startedAt>=LIMITS.replyLoadTimeoutMs)throw new AppError('PARSE_FAILED','回复展开后10秒未发现新增回复；已暂停，请人工检查，已保存结果保留');
+  }
+
+  /** 一次只加载一组回复，等待增量数据后才能再次展开或滚动；任何动作前再次校验会话与平台状态。 */
+  private advanceReplies(): boolean {
+    const session=this.session!;
+    if(session.replyLoad)return true;
+    for(const {control,parent} of replyExpandControls(this.getDoc())) {
+      const parentKey=session.sourceKeys.get(parent) ?? (parent.id?session.elementKey.get(parent.id):undefined);
+      if(!parentKey)throw new AppError('PARSE_FAILED','无法确认回复控件的父评论关系，已暂停');
+      const before=session.buffer.filter(c=>c.parentKey===parentKey).length;
+      const requestKey=`${parentKey}\u0001${before}\u0001${(control.textContent??'').replace(/\s+/g,' ').trim()}`;
+      if(session.replyRequests.has(requestKey))throw new AppError('PARSE_FAILED','回复控件未产生新内容，已暂停，禁止重复点击');
+      if(session.replyActions>=LIMITS.maxReplyActions)throw new AppError('PARSE_FAILED','达到本帖100次回复展开上限；已暂停，已保存内容保留');
+      this.assertLive(session.id,session.noteKey);
+      if(session.limitReached)return true;
+      session.replyRequests.add(requestKey);session.replyActions++;
+      session.replyLoad={parentKey,before,startedAt:this.now(),lastCount:before,changedAt:this.now()};
+      control.click();
+      return true;
+    }
+    return false;
   }
 
   /** 只滚动已确认评论列表在当前笔记内的可滚动祖先，不点击按钮、不访问接口。 */
@@ -213,6 +248,7 @@ export class XhsSessionManager {
       capturedAt: isoNow(this.now),
       note: session.note,
       comments: chunk,
+      loadingReplies: session.replyLoad !== null,
       hasMoreLoaded: hasMore,
       truncated: session.limitReached,
       nextCursor: hasMore ? `${session.id}.${session.version}.${offset + chunk.length}` : null,
@@ -239,9 +275,10 @@ export class XhsSessionManager {
         break;
       }
       const text = redactText(p.text);
-      const parentKey = p.isSub && p.parentElementId
-        ? session.elementKey.get(p.parentElementId) ?? null
+      const parentKey = p.isSub
+        ? (p.parentElementId ? session.elementKey.get(p.parentElementId) : undefined) ?? (p.parentElement ? session.sourceKeys.get(p.parentElement) : undefined) ?? (p.parentContainer ? session.sourceKeys.get(p.parentContainer) : undefined) ?? null
         : null;
+      if(p.isSub && !parentKey){if(strict)throw new AppError('PARSE_FAILED','无法确认回复的父评论关系，已暂停；不会把回复当一级评论');continue;}
       if (p.elementId && !session.elementOrdinal.has(p.elementId)) {
         session.elementOrdinal.set(p.elementId, this.ordinal++);
       }
@@ -261,6 +298,8 @@ export class XhsSessionManager {
         parentKey,
         ordinal,
       });
+      session.sourceKeys.set(p.sourceElement,identity.commentKey);
+      if(!p.isSub){const wrapper=p.sourceElement.closest(SEL.parentWrapper);if(wrapper)session.sourceKeys.set(wrapper,identity.commentKey);}
       if (p.elementId) session.elementKey.set(p.elementId, identity.commentKey);
       if (session.keySet.has(identity.commentKey)) continue;
       if (!normalizeCommentText(text)) continue;

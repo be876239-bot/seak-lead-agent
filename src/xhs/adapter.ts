@@ -19,6 +19,8 @@ export type ParsedComment = {
   platformCommentId: string | null;
   noteKey: string;
   parentElementId: string | null;
+  parentElement: Element | null;
+  parentContainer: Element | null;
   text: string;
   authorDisplayName: string | null;
   authorLocalKey: string | null;
@@ -75,7 +77,7 @@ function countOf(text: string | null): number | null {
   return num ? Number(num[1]) : null;
 }
 
-function parseItem(el: Element, noteKey: string, isSub: boolean, parentElementId: string | null): ParsedComment {
+function parseItem(el: Element, noteKey: string, isSub: boolean, parentElementId: string | null, parentElement: Element | null = null, parentContainer: Element | null = null): ParsedComment {
   const rawId = (el.getAttribute('id') || '').startsWith(SEL.commentIdAttrPrefix) ? el.getAttribute('id') : null;
   const platformCommentId = rawId ? rawId.slice(SEL.commentIdAttrPrefix.length) : null;
   const authorA = el.querySelector(SEL.authorLink);
@@ -93,6 +95,8 @@ function parseItem(el: Element, noteKey: string, isSub: boolean, parentElementId
     platformCommentId,
     noteKey,
     parentElementId,
+    parentElement,
+    parentContainer,
     text,
     authorDisplayName: name || null,
     authorLocalKey,
@@ -119,10 +123,9 @@ export function parseLoadedComments(doc: Document, noteKey: string): ParsedComme
   const out: ParsedComment[] = [];
   for (const wrapper of list.querySelectorAll(':scope > .parent-comment')) {
     const top = wrapper.querySelector(':scope > .comment-item:not(.comment-item-sub)');
-    if (!top) continue;
-    out.push(parseItem(top, noteKey, false, null));
+    if (top) out.push(parseItem(top, noteKey, false, null));
     for (const sub of wrapper.querySelectorAll(`${SEL.replyContainer} ${SEL.subCommentItem}`)) {
-      out.push(parseItem(sub, noteKey, true, top.getAttribute('id')));
+      out.push(parseItem(sub, noteKey, true, top?.getAttribute('id')??null, top, wrapper));
     }
   }
   // 少数页面顶层评论不在 .parent-comment 包装内
@@ -130,4 +133,22 @@ export function parseLoadedComments(doc: Document, noteKey: string): ParsedComme
     out.push(parseItem(bare, noteKey, false, null));
   }
   return out;
+}
+
+/** 只接受历史fixture证实的回复容器.show-more及明确展开文案，绝不点击.interactions里的“回复”。 */
+export function replyExpandControls(doc: Document): {control:HTMLElement;parent:Element}[] {
+  const list=doc.querySelector(SEL.listContainer);if(!list)return [];
+  const found:{control:HTMLElement;parent:Element}[]=[];
+  for(const wrapper of list.querySelectorAll(':scope > .parent-comment')) {
+    const parent=wrapper.querySelector(':scope > .comment-item:not(.comment-item-sub)')??wrapper;
+    for(const control of wrapper.querySelectorAll<HTMLElement>(`${SEL.replyContainer} ${SEL.showMore}`)) {
+      if(control.closest(SEL.parentWrapper)!==wrapper || control.closest('.interactions,form') || control.hasAttribute('href') || control.hasAttribute('disabled') || control.getAttribute('aria-disabled')==='true')continue;
+      const text=(control.textContent??'').replace(/\s+/g,' ').trim();
+      if(!/^(?:展开\s*(?:\d+\s*条|全部|更多)?|查看\s*(?:全部|更多)|加载\s*更多)\s*回复$/.test(text))continue;
+      let visible=true;
+      for(let node:Element|null=control;node;node=node.parentElement){const style=doc.defaultView?.getComputedStyle(node);if(node.hasAttribute('hidden')||node.getAttribute('aria-hidden')==='true'||style?.display==='none'||style?.visibility==='hidden'){visible=false;break;}}
+      if(visible)found.push({control,parent});
+    }
+  }
+  return found;
 }

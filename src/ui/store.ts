@@ -16,3 +16,11 @@ export async function setSelectedProductId(id: string | null): Promise<void> {
   if (id) await browser.storage.local.set({ [SELECTED_KEY]: id });
   else await browser.storage.local.remove(SELECTED_KEY);
 }
+
+/** 线索列表即使父评论未参与分析，也只按真实parentKey补取上下文。 */
+export async function getLeadComments(keys:string[]) {
+  const comments=await ui.getComments(keys);
+  const present=new Set(comments.map(c=>c.commentKey));
+  const parents=await ui.getComments([...new Set(comments.flatMap(c=>c.parentKey && !present.has(c.parentKey)?[c.parentKey]:[]))]);
+  return [...comments,...parents.filter(p=>comments.some(c=>c.parentKey===p.commentKey && c.noteKey===p.noteKey))];
+}

@@ -96,14 +96,17 @@ export async function captureNote(tabId: number, options: CaptureOptions = {}): 
   let hasMoreLoaded = false;
   let endOfList = false;
   let addedCount = 0;
+  let loadingReplies=false;
   const report = async (loading: boolean, stopReason: CaptureProgress['stopReason'] = null) => {
-    await options.onProgress?.({ discoveredCount: found.size, addedCount, loading, stopReason });
+    const replyCount=[...found.values()].filter(c=>c.parentKey!==null).length;
+    await options.onProgress?.({ discoveredCount: found.size, addedCount, loading, stopReason,replyCount,topLevelCount:found.size-replyCount,loadingReplies:loading&&loadingReplies });
   };
   const accept = async (page: SnapshotPayload) => {
     checkCancelled(signal);
     if (page.noteKey !== expectedNoteKey || page.sessionId !== first!.sessionId || (page.note && page.note.noteKey !== expectedNoteKey)) {
       throw new AppError('PAGE_CHANGED', '快照所属笔记或会话改变，已停止采集');
     }
+    loadingReplies=page.loadingReplies===true;
     note ??= page.note;
     if (!note) throw new AppError('PARSE_FAILED', '未能解析笔记内容');
     const delta = page.comments.filter((c) => !found.has(c.commentKey)).slice(0,LIMITS.maxSessionComments-found.size);
@@ -165,7 +168,8 @@ export async function captureNote(tabId: number, options: CaptureOptions = {}): 
           await drain(await snapshot(null));
           await report(true);
         }
-        if (found.size === before) idleRounds += 1; else idleRounds = 0;
+        if(loadingReplies) idleRounds=0;
+        else if (found.size === before) idleRounds += 1; else idleRounds = 0;
         if (truncated) { stopReason = 'limit'; break; }
         if (endOfList) { stopReason = 'no_more'; break; }
         if (idleRounds >= LIMITS.captureIdleRounds) { stopReason = 'no_new'; break; }
