@@ -98,7 +98,7 @@ describe('XHS_START_SESSION', () => {
     const parsed = SnapshotPayload.parse(snap);
     expect(parsed.noteKey).toBe(NOTE_KEY);
     // 28 条已加载评论中 2 条为纯图片（note-text 仅含 img），无文本可分析
-    expect(parsed.comments).toHaveLength(26);
+    expect(parsed.comments).toHaveLength(28);
     expect(parsed.comments.every((c) => c.text.trim().length > 0)).toBe(true);
     expect(parsed.hasMoreLoaded).toBe(false);
     expect(parsed.truncated).toBe(false);

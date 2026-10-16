@@ -82,6 +82,23 @@ describe('parseLoadedComments — note-detail-expanded', () => {
   });
 });
 
+describe('parseLoadedComments — structural resilience', () => {
+  it('comment-item 不在 parent-comment 直接子节点时仍能发现', () => {
+    const dom = new JSDOM(`<div id="noteContainer"><div class="comments-el"><div class="list-container"><div class="parent-comment"><div class="shell"><div class="comment-item" id="comment-0001"><div class="content"><span class="note-text">嵌套一级评论</span></div></div></div></div></div></div></div>`);
+    const comments = parseLoadedComments(dom.window.document, NOTE_KEY);
+    expect(comments).toHaveLength(1);
+    expect(comments[0]!.isSub).toBe(false);
+    expect(comments[0]!.text).toBe('嵌套一级评论');
+  });
+
+  it('纯图片评论保留为非文字占位，而不是静默丢弃', () => {
+    const dom = new JSDOM(`<div id="noteContainer"><div class="comments-el"><div class="list-container"><div class="parent-comment"><div class="comment-item" id="comment-0001"><div class="content"><span class="note-text"><img src="ph"></span></div></div></div></div></div></div>`);
+    const comments = parseLoadedComments(dom.window.document, NOTE_KEY);
+    expect(comments).toHaveLength(1);
+    expect(comments[0]!.text).toBe('[non-text-comment]');
+  });
+});
+
 describe('parseLoadedComments — 其他 fixture', () => {
   it('折叠态：10 顶层 + 8 子', () => {
     const comments = parseLoadedComments(load('note-detail-collapsed'), NOTE_KEY);

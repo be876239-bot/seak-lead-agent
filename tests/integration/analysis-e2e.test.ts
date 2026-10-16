@@ -194,17 +194,17 @@ describe('G2 mock 端到端闭环（产品→当前页→分析→保存→再�
     expect((await repos.getProduct(product.id))?.profile.name.value).toBe('备考题库');
 
     const snap = await captureFromFixture();
-    expect(snap.comments.length).toBe(26);
+    expect(snap.comments.length).toBe(28);
 
     const before = classifyCalls;
     const job = await runCommentsJob(deps(provider), { productId: product.id, note: snap.note!, comments: snap.comments });
     expect(job.status).toBe('completed');
-    expect(job.totalItems).toBe(26);
-    expect(job.completedItems).toBe(26);
-    expect(classifyCalls - before).toBe(2); // 15 + 11 两批
+    expect(job.totalItems).toBe(28);
+    expect(job.completedItems).toBe(28);
+    expect(classifyCalls - before).toBe(2); // 15 + 13 两批
 
     const analyses = await db.analyses.toArray();
-    expect(analyses.length).toBe(26);
+    expect(analyses.length).toBe(28);
     for (const a of analyses) {
       expect(a.group).toBe('high_intent');
       expect(a.commentKey.startsWith(NOTE_KEY)).toBe(true);
@@ -238,7 +238,7 @@ describe('G2 mock 端到端闭环（产品→当前页→分析→保存→再�
     const job = await runCommentsJob(deps(failing), { productId: product.id, note: snap.note!, comments: snap.comments });
     expect(job.status).toBe('partial');
     expect(job.completedItems).toBe(15);
-    expect(job.failedItems).toBe(11);
+    expect(job.failedItems).toBe(13);
     expect((await db.analyses.toArray()).length).toBe(15);
     const rows = await repos.batchesForJob(job.id);
     expect(rows.map((r) => r.status)).toEqual(['completed', 'failed']);
@@ -252,8 +252,8 @@ describe('G2 mock 端到端闭环（产品→当前页→分析→保存→再�
     });
     const retried = await retryCommentsJob(deps(fixed), job.id);
     expect(retried.status).toBe('completed');
-    expect(retryInputs).toEqual([11]); // 第 1 批绝不重跑
-    expect((await db.analyses.toArray()).length).toBe(26);
+    expect(retryInputs).toEqual([13]); // 第 1 批绝不重跑
+    expect((await db.analyses.toArray()).length).toBe(28);
   });
 
   it('取消：已完成结果保留，运行中批次标 interrupted，可重试收尾', async () => {
@@ -277,7 +277,7 @@ describe('G2 mock 端到端闭环（产品→当前页→分析→保存→再�
     const gold2 = new MockProvider({ classification: goldClassification });
     const retried = await retryCommentsJob(deps(gold2), job.id);
     expect(retried.status).toBe('completed');
-    expect((await db.analyses.toArray()).length).toBe(26);
+    expect((await db.analyses.toArray()).length).toBe(28);
   });
 
   it('并发互斥：另一面板持锁时新任务报 LOCK_HELD，Job 行留痕为 failed', async () => {
@@ -328,8 +328,8 @@ describe('G2 mock 端到端闭环（产品→当前页→分析→保存→再�
     expect(v2.profileVersion).toBe(2);
     const job = await runCommentsJob(deps(provider), { productId: product.id, note: snap.note!, comments: snap.comments });
     expect(counter.c).toBe(4);
-    expect(job.totalItems).toBe(26);
-    expect((await db.analyses.toArray()).length).toBe(52);
+    expect(job.totalItems).toBe(28);
+    expect((await db.analyses.toArray()).length).toBe(56);
   });
 
   it('画像输出无效 → 修复一次；仍无效则失败且不留产品', async () => {
@@ -362,7 +362,7 @@ describe('G2 mock 端到端闭环（产品→当前页→分析→保存→再�
     const snap = await captureFromFixture();
     // 使用真实 runner 生成有效快照和缓存键，再模拟后台退出遗留状态。
     const failing = new MockProvider({ classification: () => { throw new AppError('AI_TIMEOUT', '模拟中断'); } });
-    const job = await runCommentsJob(deps(failing), { productId: product.id, note: snap.note!, comments: snap.comments.slice(15) });
+    const job = await runCommentsJob(deps(failing), { productId: product.id, note: snap.note!, comments: snap.comments.slice(0, 13) });
     const jobId = job.id;
     await repos.updateJob(jobId, { status: 'analyzing' });
     for (const row of await repos.batchesForJob(jobId)) await repos.updateBatch(row.id, { status: 'running' });
@@ -372,8 +372,8 @@ describe('G2 mock 端到端闭环（产品→当前页→分析→保存→再�
     const p2 = new MockProvider({ classification: (input) => { seen = input.items.length; return goldClassification(input); } });
     const done = await retryCommentsJob(deps(p2), jobId);
     expect(done.status).toBe('completed');
-    expect(seen).toBe(11);
-    expect((await db.analyses.toArray()).length).toBe(11);
+    expect(seen).toBe(13);
+    expect((await db.analyses.toArray()).length).toBe(13);
   });
 });
 
@@ -381,5 +381,5 @@ it('外部寻找任务signal取消分析：迟到模型结果不能写Lead，已
  const provider=new MockProvider({profile:profileScript});const product=await makeProduct(provider);const snap=await captureFromFixture();const ac=new AbortController();
  provider.classifyComments=async input=>{ac.abort();return {value:goldClassification(input),model:'mock-model',usage:{inputTokens:12,outputTokens:8}};};
  const job=await runCommentsJob(deps(provider),{productId:product.id,note:snap.note!,comments:snap.comments,signal:ac.signal});
- expect(job.status).toBe('cancelled');expect(await db.analyses.count()).toBe(0);expect(await db.comments.count()).toBe(26);
+ expect(job.status).toBe('cancelled');expect(await db.analyses.count()).toBe(0);expect(await db.comments.count()).toBe(28);
 });

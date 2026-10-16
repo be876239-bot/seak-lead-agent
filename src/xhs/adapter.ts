@@ -86,7 +86,9 @@ function parseItem(el: Element, noteKey: string, isSub: boolean, parentElementId
   const path = href ? /^\/user\/profile\/[^/?#]+/.exec(href)?.[0] ?? null : null;
   const profileUrl = path ? `https://www.xiaohongshu.com${path}` : null;
   const authorLocalKey = path ? path.split('/').pop() ?? null : null;
-  let text = (el.querySelector(SEL.content)?.textContent || '').trim();
+  const content = el.querySelector(SEL.content);
+  let text = (content?.textContent || '').trim();
+  if (!text && content?.querySelector('img,svg,canvas')) text = '[non-text-comment]';
   const truncated = text.length > LIMITS.maxCommentChars;
   text = text.slice(0, LIMITS.maxCommentChars);
   return {
@@ -121,16 +123,25 @@ export function parseLoadedComments(doc: Document, noteKey: string): ParsedComme
     throw new AppError('PARSE_FAILED', '未找到评论列表容器');
   }
   const out: ParsedComment[] = [];
-  for (const wrapper of list.querySelectorAll(':scope > .parent-comment')) {
-    const top = wrapper.querySelector(':scope > .comment-item:not(.comment-item-sub)');
-    if (top) out.push(parseItem(top, noteKey, false, null));
-    for (const sub of wrapper.querySelectorAll(`${SEL.replyContainer} ${SEL.subCommentItem}`)) {
-      out.push(parseItem(sub, noteKey, true, top?.getAttribute('id')??null, top, wrapper));
+  const seen = new Set<Element>();
+
+  // 不再假设每个评论永远是 parent-comment 的直接子节点。
+  // 虚拟列表重渲染时包装层/评论层可能短暂改变；只要 comment-item
+  // 仍位于已确认的 listContainer 内，就解析它。范围仍严格限制在评论列表，
+  // 不做全页文本兜底，也不会把互动区的元素当评论。
+  for (const el of list.querySelectorAll(`${SEL.commentItem},${SEL.subCommentItem}`)) {
+    if (seen.has(el)) continue;
+    seen.add(el);
+    const isSub = el.classList.contains('comment-item-sub');
+    const wrapper = el.closest(SEL.parentWrapper);
+    const top = wrapper?.querySelector(':scope > .comment-item:not(.comment-item-sub)') ?? null;
+    if (!isSub) {
+      out.push(parseItem(el, noteKey, false, null, null, wrapper));
+      continue;
     }
-  }
-  // 少数页面顶层评论不在 .parent-comment 包装内
-  for (const bare of list.querySelectorAll(':scope > .comment-item:not(.comment-item-sub)')) {
-    out.push(parseItem(bare, noteKey, false, null));
+    // 回复可以在父评论 DOM 被虚拟列表移除后继续存在；保留 wrapper 引用，
+    // 让 session 层用本次会话已经确认的父键恢复 parentKey。
+    out.push(parseItem(el, noteKey, true, top?.getAttribute('id') ?? null, top, wrapper));
   }
   return out;
 }
