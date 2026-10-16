@@ -123,6 +123,11 @@ export default function CurrentNote() {
     })();
   }, [refreshTab, loadResults]);
 
+  const fullRetry = async () => {
+    if (!window.confirm('完整重试：重新读取本页已加载评论并创建新任务，全部评论重新过一遍流程——已分析成功的命中缓存、不重复计费；失败或未分析过的会重新提交模型。继续？')) return;
+    await analyze();
+  };
+
   const busy = isJobActive(job);
 
   useEffect(() => {
@@ -229,6 +234,7 @@ export default function CurrentNote() {
         </button>
         {busy && <button onClick={() => void cancel()}>取消任务</button>}
         {!busy && isRetryableJob(job) && <button onClick={() => void retry()}>重试失败/中断批次</button>}
+        {!busy && job && <button onClick={() => void fullRetry()}>完整重试（重读页面＋重跑全部）</button>}
       </div>
       {!busy && (
         <p style={{ color: '#888', margin: 0, fontSize: 11 }}>
