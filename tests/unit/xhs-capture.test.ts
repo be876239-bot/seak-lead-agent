@@ -51,6 +51,25 @@ beforeEach(() => { sendMessage.mockReset(); });
 afterEach(() => vi.useRealTimers());
 
 describe('captureNote 采集编排', () => {
+  it('a temporarily missing list preserves saved comments and retries without another scroll',async()=>{
+    let calls=0;const wait=vi.fn(async()=>{});const saved:string[]=[];
+    route({XHS_GET_STATUS:()=>statusOk(),XHS_START_SESSION:()=>buildOk('r',snapshot([comment('1')],null)),
+      XHS_GET_SNAPSHOT:()=>++calls<3?buildError('r',{code:'PARSE_FAILED',message:'未找到评论列表容器',retryable:false}):buildOk('r',snapshot([comment('2')],null,{truncated:true})),
+      XHS_STOP_SESSION:()=>buildOk('r',{stopped:true})});
+    const result=await captureNote(7,{autoLoad:true,wait,onDelta:async(_note,comments)=>{saved.push(...comments.map(c=>c.commentKey));}});
+    expect(result.comments).toHaveLength(2);expect(saved).toEqual([comment('1').commentKey,comment('2').commentKey]);expect(wait).toHaveBeenCalledTimes(2);
+    const requests=sendMessage.mock.calls.map(([,r])=>r).filter(r=>r.type==='XHS_GET_SNAPSHOT');
+    expect(requests.map(r=>r.payload.advance===true)).toEqual([true,false,false]);
+  });
+  it.each(['persistent','cancelled','blocked','changed','other-parse'])('missing-list wait remains bounded and guarded: %s',async mode=>{
+    const ac=new AbortController();let calls=0;const wait=vi.fn(async()=>{if(mode==='cancelled')ac.abort();});
+    route({XHS_GET_STATUS:()=>statusOk(),XHS_START_SESSION:()=>buildOk('r',snapshot([comment('1')],null)),
+      XHS_GET_SNAPSHOT:()=>{calls++;return buildError('r',calls>1&&mode==='blocked'?{code:'PAGE_BLOCKED',message:'安全验证',retryable:false}:calls>1&&mode==='changed'?{code:'PAGE_CHANGED',message:'页面变化',retryable:false}:{code:'PARSE_FAILED',message:mode==='other-parse'?'回复父关系异常':'未找到评论列表容器',retryable:false});},
+      XHS_STOP_SESSION:()=>buildOk('r',{stopped:true})});
+    await expect(captureNote(7,{autoLoad:true,signal:ac.signal,wait})).rejects.toMatchObject({code:mode==='cancelled'?'CANCELLED':mode==='blocked'?'PAGE_BLOCKED':mode==='changed'?'PAGE_CHANGED':'PARSE_FAILED'});
+    expect(wait).toHaveBeenCalledTimes(mode==='persistent'?10:mode==='other-parse'?0:1);expect(calls).toBe(mode==='persistent'?11:mode==='other-parse'||mode==='cancelled'?1:2);
+    expect(sendMessage.mock.calls.at(-1)![1].type).toBe('XHS_STOP_SESSION');
+  });
   it('采集中页面消息不返回，取消仍能立即终止等待并发送STOP', async () => {
     const ac = new AbortController();
     route({

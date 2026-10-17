@@ -28,6 +28,17 @@ beforeEach(async()=>{
 });
 afterEach(()=>{manager.dispose();db.close();});
 
+it('14条已落库后列表临时消失，等待重建、不重复滚动，最终累计1至30',async()=>{
+ list().innerHTML=items(1,14);let restored=false;
+ scroll.mockImplementation(({top})=>{scroller.scrollTop=Math.min(500,scroller.scrollTop+top);if(scroll.mock.calls.length===1)list().remove();});
+ const result=await captureNote(7,{autoLoad:true,onDelta:persist,wait:async()=>{
+  await tick();if(!restored){expect(await db.comments.count()).toBe(14);expect(scroll).toHaveBeenCalledTimes(1);
+   if(clock>=1000){restored=true;document.querySelector('.comments-el')!.innerHTML=`<div class="list-container">${items(15,30)}</div>`;}
+  }
+ }});
+ expect(restored).toBe(true);expect(result.comments).toHaveLength(30);expect(await db.comments.count()).toBe(30);expect(result.stopReason).toBe('no_new');
+});
+
 it('1/3 重叠虚拟窗口1–20→15–35→30–50，最终数据库恰好1–50',async()=>{
  scroll.mockImplementation(({top})=>{scroller.scrollTop=Math.min(500,scroller.scrollTop+top);const n=scroll.mock.calls.length;if(n===1)list().innerHTML=items(15,35);if(n===2)list().innerHTML=items(30,50);});
  const r=await captureNote(7,{autoLoad:true,wait:tick,onDelta:persist});

@@ -135,10 +135,23 @@ export async function captureNote(tabId: number, options: CaptureOptions = {}): 
     endOfList ||= page.endOfList === true;
   };
   const snapshot = async (cursor: string | null, advance = false) => {
-    checkCancelled(signal);
-    return SnapshotPayload.parse(await ask(tabId, buildRequest('XHS_GET_SNAPSHOT', {
-      sessionId: first!.sessionId, expectedNoteKey, cursor, ...(advance ? { advance: true } : {}),
-    }), signal));
+    for(let sample=0;;sample++) {
+      checkCancelled(signal);
+      try {
+        return SnapshotPayload.parse(await ask(tabId, buildRequest('XHS_GET_SNAPSHOT', {
+          sessionId: first!.sessionId, expectedNoteKey, cursor, ...(advance ? { advance: true } : {}),
+        }), signal));
+      }catch(err) {
+        // Only these two known adapter errors can mean a temporary DOM rebuild.
+        // Every retry still validates the same session/note and platform guards.
+        if(!options.autoLoad || !(err instanceof AppError) || err.code!=='PARSE_FAILED' ||
+          !['未找到评论列表容器','未找到评论容器，页面可能未加载完成或结构已变化'].includes(err.message))throw err;
+        if(sample>=LIMITS.captureListWaitSamples)throw new AppError('PARSE_FAILED',`评论列表在5秒等待后仍未恢复；已保存 ${found.size} 条评论，请人工检查后继续`);
+        advance=false; // The failed request may already have scrolled. Never scroll again while waiting.
+        await report(true);
+        await (options.wait??waitForLoad)(LIMITS.capturePollMs,signal);
+      }
+    }
   };
   const drain = async (page: SnapshotPayload) => {
     let restarts = 0;

@@ -1,5 +1,7 @@
 # 觅客Agent 测试报告（T28 自动化回归 + T31 静态审查）
 
+**最新D018：33文件385项通过，新增7项；typecheck/lint/Edge build/ZIP/diff检查通过。[评论列表缺失恢复报告](comment-list-recovery-2026-10-17.md)。新版真实小红书NOT VERIFIED。**
+
 **D017最终组合验证：修复dfebad5与并发提交e90eca3已通过ad65700合并，主目录33文件378项通过；typecheck/lint/build:edge/zip:edge/diff检查通过。主目录Edge包已更新，SHA256及隔离/合并记录见[无历史返回报告](discovery-missing-history-2026-10-17.md)。真实新版NOT VERIFIED。**
 
 **最新D017：独立工作树33文件377项通过，新增13项；typecheck/lint/Edge build/ZIP/diff检查通过。主目录并发改动未混入。F新版真实小红书NOT VERIFIED。见[无历史返回修复报告](discovery-missing-history-2026-10-17.md)。**

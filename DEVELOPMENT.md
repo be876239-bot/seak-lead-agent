@@ -1,5 +1,7 @@
 # 觅客Agent MVP 开发文档
 
+**2026-10-17 最新D018**：真实日志显示同帖14条后评论列表缺失；自动采集对精确容器缺失错误最多等待5秒，期间不再滚动，保留原集合/DB。永久缺失仍报错暂停，平台/取消/换帖立即停止；未改解析器/导航/AI。新增7项，总385通过，新版真实NOT VERIFIED。见 `docs/comment-list-recovery-2026-10-17.md`。
+
 **D017组合交付补充**：独立修复dfebad5已与并发e90eca3通过ad65700合并回codex/eric-development，主目录378项全量测试及typecheck/lint/Edge build/ZIP通过。最终交付使用主目录.output/edge-mv3及ZIP，取代隔离验证包。真实新版仍NOT VERIFIED。
 
 **2026-10-17 最新（D017）**：真实日志确认Back无历史导致execute暂停；仅针对该精确错误增加一次已确认笔记关闭控件的正常DOM点击，再严格确认原搜索页。正常Back/串行状态机不改，非该错误/平台验证仍暂停。新增13项，总377通过，真实新版NOT VERIFIED。并发工作隔离于codex/history-return-fix，见 `docs/discovery-missing-history-2026-10-17.md`。

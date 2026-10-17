@@ -29,6 +29,7 @@ export const LIMITS = {
   replyQuietMs: 1_000,
   maxReplyActions: 100,
   capturePollMs: 500,
+  captureListWaitSamples: 10,
   captureMessageTimeoutMs: 10_000,
   captureSamplesPerRound: 5,
   captureIdleRounds: 4,
