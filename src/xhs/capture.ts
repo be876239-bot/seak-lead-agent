@@ -14,6 +14,7 @@ export type CapturedNote = {
   truncated: boolean;
   hasMoreLoaded: boolean;
   stopReason?: CaptureProgress['stopReason'];
+  displayedCommentCount?: number | null;
 };
 
 export async function ask(tabId: number, req: Request, signal?: AbortSignal): Promise<unknown> {
@@ -98,9 +99,12 @@ export async function captureNote(tabId: number, options: CaptureOptions = {}): 
   let addedCount = 0;
   let loadingReplies=false;
   let activityVersion=0,atBottom=true,loadingComments=false;
+  let displayedCommentCount:number|null=null;
   const report = async (loading: boolean, stopReason: CaptureProgress['stopReason'] = null) => {
     const replyCount=[...found.values()].filter(c=>c.parentKey!==null).length;
-    await options.onProgress?.({ discoveredCount: found.size, addedCount, loading, stopReason,replyCount,topLevelCount:found.size-replyCount,loadingReplies:loading&&loadingReplies });
+    const topLevelCount=found.size-replyCount;
+    const countStatus=displayedCommentCount===null?'unknown':found.size<displayedCommentCount?'below_displayed_total':'meets_or_exceeds_displayed_total';
+    await options.onProgress?.({ discoveredCount: found.size, addedCount, loading, stopReason,replyCount,topLevelCount,loadingReplies:loading&&loadingReplies,displayedCommentCount,countStatus });
   };
   const accept = async (page: SnapshotPayload) => {
     checkCancelled(signal);
@@ -111,6 +115,7 @@ export async function captureNote(tabId: number, options: CaptureOptions = {}): 
     activityVersion=page.activityVersion??activityVersion;
     atBottom=page.atBottom??true;
     loadingComments=page.loadingComments===true;
+    if(page.displayedCommentCount!==undefined && page.displayedCommentCount!==null) displayedCommentCount=page.displayedCommentCount;
     note ??= page.note;
     if (!note) throw new AppError('PARSE_FAILED', '未能解析笔记内容');
     const delta = page.comments.filter((c) => !found.has(c.commentKey)).slice(0,LIMITS.maxSessionComments-found.size);
@@ -186,7 +191,7 @@ export async function captureNote(tabId: number, options: CaptureOptions = {}): 
     }
     checkCancelled(signal);
     await report(false, stopReason);
-    return { noteKey: expectedNoteKey, parserVersion: status.parserVersion, note: note!, comments: [...found.values()], truncated, hasMoreLoaded, stopReason };
+    return { noteKey: expectedNoteKey, parserVersion: status.parserVersion, note: note!, comments: [...found.values()], truncated, hasMoreLoaded, stopReason, displayedCommentCount };
   } catch (err) {
     await report(false, signal?.aborted ? 'cancelled' : 'error').catch(() => {});
     if (signal?.aborted) throw new AppError('CANCELLED', '评论采集已取消');

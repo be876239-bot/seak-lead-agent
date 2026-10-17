@@ -10,7 +10,7 @@ import {
   type XhsStatusPayload,
   type SnapshotPayload,
 } from '../messaging/protocol';
-import { detectPage, parseLoadedComments, parseCommentSubtree, parseNote, replyExpandControls, type ParsedComment } from './adapter';
+import { detectPage, parseLoadedComments, parseCommentSubtree, parseNote, parseDisplayedCommentCount, replyExpandControls, type ParsedComment } from './adapter';
 import { SEL, PARSER_VERSION } from './selectors';
 
 export type EndReason = 'stopped' | 'page_changed' | 'blocked' | 'heartbeat';
@@ -274,6 +274,7 @@ export class XhsSessionManager {
       atBottom:scroll?scroll.scrollTop+scroll.clientHeight>=scroll.scrollHeight-2:undefined,
       // 仅页面DOM的标准加载语义，不检查网络请求、账号状态或私有接口。
       loadingComments:!!area&&(area.getAttribute('aria-busy')==='true'||!!area.querySelector('[aria-busy="true"],[role="progressbar"]')),
+      displayedCommentCount:parseDisplayedCommentCount(this.getDoc()),
     };
   }
 

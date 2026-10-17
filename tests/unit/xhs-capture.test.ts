@@ -7,6 +7,7 @@ const sendMessage = vi.hoisted(() => vi.fn());
 vi.mock('wxt/browser', () => ({ browser: { tabs: { sendMessage } } }));
 
 const { captureNote } = await import('../../src/xhs/capture');
+const { parseDisplayedCommentCount } = await import('../../src/xhs/adapter');
 
 const NOTE_KEY = 'xhs:abcdef';
 const TS = '2026-10-15T00:00:00Z';
@@ -134,5 +135,14 @@ describe('captureNote 采集编排', () => {
     expect(cap.hasMoreLoaded).toBe(true);
     expect(cap.truncated).toBe(true);
     expect(cap.note.title).toBe('笔记标题');
+  });
+
+  it('reads only the verified comment total selector and supports 万 units', () => {
+    document.body.innerHTML = '<div id="noteContainer"><div class="comments-el"><div class="total">共 1.2万 条评论</div></div></div>';
+    expect(parseDisplayedCommentCount(document)).toBe(12000);
+    document.querySelector('.total')!.textContent = '共 86 条评论';
+    expect(parseDisplayedCommentCount(document)).toBe(86);
+    document.querySelector('.total')!.textContent = '评论加载中';
+    expect(parseDisplayedCommentCount(document)).toBeNull();
   });
 });

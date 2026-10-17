@@ -166,6 +166,9 @@ export const CaptureProgressSchema = z.object({
   topLevelCount: z.number().int().min(0).max(LIMITS.maxSessionComments).optional(),
   replyCount: z.number().int().min(0).max(LIMITS.maxSessionComments).optional(),
   loadingReplies: z.boolean().optional(),
+  /** Page-displayed comment total; informational because platform counting may differ from accessible DOM comments. */
+  displayedCommentCount: z.number().int().nonnegative().nullable().optional(),
+  countStatus: z.enum(['unknown','below_displayed_total','meets_or_exceeds_displayed_total']).optional(),
   loading: z.boolean(),
   stopReason: z.enum(['no_new', 'no_more', 'limit', 'time_limit', 'round_limit', 'cancelled', 'error']).nullable(),
 });

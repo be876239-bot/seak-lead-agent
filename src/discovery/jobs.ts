@@ -52,7 +52,7 @@ async function launch(spec:{jobId:string;productId:string;tabId:number;direction
         const savedComments=checkpoint.post?.stage==='captured'?checkpoint.post.commentKeys.map(key=>storedComments.find(c=>c.commentKey===key)):[];
         if(checkpoint.post?.stage==='captured' && (!restoredNote || savedComments.some(c=>!c)))throw new AppError('STORAGE_ERROR','已完成采集的本地快照不完整，请检查本地数据后重新启动任务');
         checkpoint.event(checkpoint.post?.stage==='captured'?'CAPTURE_REUSED':'CAPTURE_START');
-        const snap=checkpoint.post?.stage==='captured'?{noteKey:expected,note:restoredNote!,comments:savedComments.filter((c):c is NonNullable<typeof c>=>!!c),stopReason:undefined}:await captureNote(page.tabId!,{autoLoad:true,signal,initialComments,
+        const snap=checkpoint.post?.stage==='captured'?{noteKey:expected,note:restoredNote!,comments:savedComments.filter((c):c is NonNullable<typeof c>=>!!c),stopReason:undefined,displayedCommentCount:undefined}:await captureNote(page.tabId!,{autoLoad:true,signal,initialComments,
           onDelta:async(note,comments)=>{
             assertRunning(signal);if(note.noteKey!==expected || comments.some(c=>c.noteKey!==expected))throw new AppError('PAGE_CHANGED','评论与任务笔记不一致，拒绝落库');
             await analysisRepos.saveCaptureDelta(childId,note,comments,signal);
@@ -67,6 +67,15 @@ async function launch(spec:{jobId:string;productId:string;tabId:number;direction
         assertRunning(signal);if(snap.noteKey!==expected)throw new AppError('PAGE_CHANGED','采集笔记不一致');
         if(snap.stopReason==='time_limit'||snap.stopReason==='round_limit')throw new AppError('PARSE_FAILED','评论加载达到时间/轮次上限，请人工检查后继续');
         await checkpoint.captured(snap.comments.map(c=>c.commentKey));
+        if(snap.displayedCommentCount!==undefined && snap.displayedCommentCount!==null && snap.comments.length<snap.displayedCommentCount){
+          const reason=`页面显示约 ${snap.displayedCommentCount} 条评论，但当前只采集到 ${snap.comments.length} 条；跳过本帖 AI 分析以避免对明显不完整的数据消耗额度。采集结果已保存，页面统计口径可能包含折叠/不可见内容。`;
+          acceptingProgress=false;
+          await analysisRepos.updateJob(childId,{status:'partial',totalItems:0,errorCode:'INCOMPLETE_CAPTURE'});
+          checkpoint.event('ANALYSIS_SKIPPED_INCOMPLETE');
+          progress(snap.comments.length,0,reason);
+          await checkpoint.completed();
+          return;
+        }
         await page.guard();assertRunning(signal);progress(snap.comments.length,0,'正在分析评论……');checkpoint.event('ANALYSIS_START');
         const refreshLeads=async()=>{
           const analyses=await analysisRepos.analysesFor(productId,snap.comments.map(c=>c.commentKey));

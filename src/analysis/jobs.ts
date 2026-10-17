@@ -127,6 +127,12 @@ export function registerAnalysisHandlers(): void {
         return;
       }
       emitJobLog(jobId, `已累计保存 ${snap.comments.length} 条评论${snap.truncated ? '（达到安全上限）' : ''}；停止原因：${snap.stopReason ?? '快照'}，不承诺全部评论`);
+      if(snap.displayedCommentCount!==undefined && snap.displayedCommentCount!==null && snap.comments.length<snap.displayedCommentCount){
+        const reason=`页面显示约 ${snap.displayedCommentCount} 条评论，但当前只采集到 ${snap.comments.length} 条；为避免对明显不完整的数据消耗 AI 额度，本次暂不分析。已采集内容已保存，可检查页面后重新采集。页面统计口径可能包含折叠/不可见内容。`;
+        emitJobLog(jobId,reason);
+        await analysisRepos.updateJob(jobId,{status:'partial',totalItems:0,errorCode:'INCOMPLETE_CAPTURE'});
+        return;
+      }
       const job = await runCommentsJob(deps, {
         productId, note: snap.note, comments: snap.comments, jobId, tabId,
         log: (m) => emitJobLog(jobId, m),

@@ -69,12 +69,23 @@ export function parseNote(doc: Document): ParsedNote {
 
 function countOf(text: string | null): number | null {
   if (!text) return null;
-  const t = text.trim();
+  const t = text.trim().replace(/,/g, '');
   if (!t || /^(赞|回复|分享)$/.test(t)) return null;
   const wan = /^(\d+(?:\.\d+)?)万$/.exec(t);
   if (wan) return Math.round(Number(wan[1]) * 10000);
   const num = /^(\d+)$/.exec(t);
   return num ? Number(num[1]) : null;
+}
+
+/** Reads only the verified comment-total element; null means the page's count is unavailable/unknown. */
+export function parseDisplayedCommentCount(doc: Document): number | null {
+  const text = doc.querySelector(SEL.commentTotal)?.textContent?.replace(/,/g, '').replace(/\s+/g, ' ').trim();
+  if (!text) return null;
+  const match = /(?:共\s*)?(\d+(?:\.\d+)?)\s*(万)?\s*(?:条)?\s*评论/.exec(text)
+    ?? /评论\s*(\d+(?:\.\d+)?)\s*(万)?/.exec(text);
+  if (!match) return null;
+  const value = Number(match[1]) * (match[2] ? 10000 : 1);
+  return Number.isFinite(value) && value >= 0 ? Math.round(value) : null;
 }
 
 /** 字段必须属于这一条评论，不能误读嵌套回复的作者/正文。 */
