@@ -64,6 +64,7 @@ export default function Discovery() {
       {job?.collection && job.collection.discoveredCount===state.currentComments && <div><b>本帖评论采集</b><CollectionProgressView progress={job.collection}/></div>}
       <p>Lead：发现 {state.leads} 条（高意向或有需求，在线索页查看）</p>
       <p>状态：{state.phase}</p>{state.reason && <p>{state.reason}</p>}
+      {!!state.trace?.length && <details><summary>任务诊断记录（本地，最多200条）</summary><pre style={{whiteSpace:'pre-wrap',maxHeight:260,overflow:'auto'}}>{JSON.stringify(state.trace,null,2)}</pre></details>}
       {state.status==='paused' && state.post?.stage==='completed' && <p>{state.index+1<state.total?'当前帖子已完成，继续将处理下一篇。':'最后一篇已完成，继续将完成任务收尾。'}</p>}
       {state.status==='paused' && state.post?.stage==='captured' && <p>本帖评论已保存，继续将完成分析，不重新采集。</p>}
       {job?.status==='interrupted'&&state.status==='running'&&<p>后台已中断，未自动恢复。请停止旧任务后重新启动；本地结果保留。</p>}

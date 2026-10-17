@@ -9,6 +9,7 @@ import { ask, captureNote } from '../xhs/capture';
 import { noteKeyFromUrl, noteUrl } from '../xhs/discovery-dom';
 import { SerialDiscovery } from './serial';
 import { DiscoveryBrowser, assertRunning } from './browser';
+import type {DiscoveryTrace} from '../domain/schemas';
 
 let current: {id:string; task:SerialDiscovery;page:DiscoveryBrowser} | null=null;
 let starting=false;
@@ -18,17 +19,30 @@ async function launch(spec:{jobId:string;productId:string;tabId:number;direction
   if(!product || (restored && (product.profileVersion!==restored.profileVersion || deps.modelId!==restored.modelId || deps.providerName!==restored.provider)))throw new AppError('PAGE_CHANGED','产品画像或模型已变化，请启动新任务');
   if(restored&&!restored.discovery?.navigation)throw new AppError('PAGE_CHANGED','旧版直接URL任务不能自动转换历史，请停止旧任务并从搜索页启动新任务');
   const page=new DiscoveryBrowser(tabId,restored?.discovery?.navigation??{mode:'dom-click-v1',sourceUrl,phase:'search',expectedNoteKey:null},state=>analysisRepos.updateDiscoveryNavigation(jobId,state));
+  let trace:DiscoveryTrace[]=[...(restored?.discovery?.trace??[])];
 
   const task=new SerialDiscovery(urls,{
+    observe:()=>({phase:page.navigation.phase,expectedNoteKey:page.navigation.expectedNoteKey,...page.observation}),
     now:()=>Date.now(),navigate:(url,signal)=>page.navigate(url,signal),ready:(url,signal)=>page.ready(url,signal),finish:signal=>page.returnToSearch(signal),guard:async()=>{const latest=await analysisRepos.getProduct(productId);if(!latest||latest.profileVersion!==product.profileVersion)throw new AppError('PAGE_CHANGED','产品画像变化，请重新启动任务');await page.guard();},
-    changed:async state=>{
+    changed:async (state,event)=>{
+      if(event){
+        const url=urls[state.index];const stage=state.post?.stage??'capturing';
+        const row:DiscoveryTrace={event:event.name,at:event.at,source:event.source,runId:event.runId,taskId:jobId,postIndex:state.index,
+          postKey:url?noteKeyFromUrl(url):null,postUrl:url?new URL(url).origin+new URL(url).pathname:null,phase:state.phase,taskState:state.status,
+          captureState:stage==='capturing'?'incomplete':'completed',analysisState:stage==='completed'?'completed':stage==='captured'?'pending_or_running':'pending',pauseReason:state.reason,commentCount:state.currentComments,
+          checkpoint:{stage,captureComplete:stage!=='capturing',analysisComplete:stage==='completed'},navigation:event.navigation??{phase:page.navigation.phase,expectedNoteKey:page.navigation.expectedNoteKey,...page.observation}};
+        const previous=trace.at(-1);
+        if(event.name.endsWith('_PROGRESS')&&previous?.event===event.name&&previous.postIndex===state.index&&previous.runId===event.runId)trace=trace.slice(0,-1);
+        trace=[...trace,row].slice(-200);
+      }
       await analysisRepos.updateJob(jobId,{
         status:state.status==='running'?'collecting':state.status==='paused'?'interrupted':state.status==='stopped'?'cancelled':'completed',
-        tabId:page.tabId,completedItems:state.index+(state.post?.stage==='completed'?1:0),discovery:{...state,direction,targets:urls,sourceTabId:tabId,navigation:{...page.navigation},completedNoteKeys:urls.slice(0,state.index+(state.post?.stage==='completed'?1:0)).map(noteKeyFromUrl)},
+        tabId:page.tabId,completedItems:state.index+(state.post?.stage==='completed'?1:0),discovery:{...state,trace,direction,targets:urls,sourceTabId:tabId,navigation:{...page.navigation},completedNoteKeys:urls.slice(0,state.index+(state.post?.stage==='completed'?1:0)).map(noteKeyFromUrl)},
       });
     },
     process:async(url,signal,progress,checkpoint)=>{
       const expected=noteKeyFromUrl(url);const childId=crypto.randomUUID();
+      const processingIndex=task.state.index;
       await analysisRepos.createJob({...baseJob(deps,childId),kind:'comments',status:'collecting',productId,tabId:page.tabId,noteKey:expected,promptVersion:COMMENT_PROMPT_VERSION});
       let acceptingProgress=true;
       try {
@@ -37,17 +51,23 @@ async function launch(spec:{jobId:string;productId:string;tabId:number;direction
         const restoredNote=checkpoint.post?.stage==='captured'?await analysisRepos.getNote(expected):null;
         const savedComments=checkpoint.post?.stage==='captured'?checkpoint.post.commentKeys.map(key=>storedComments.find(c=>c.commentKey===key)):[];
         if(checkpoint.post?.stage==='captured' && (!restoredNote || savedComments.some(c=>!c)))throw new AppError('STORAGE_ERROR','已完成采集的本地快照不完整，请检查本地数据后重新启动任务');
+        checkpoint.event(checkpoint.post?.stage==='captured'?'CAPTURE_REUSED':'CAPTURE_START');
         const snap=checkpoint.post?.stage==='captured'?{noteKey:expected,note:restoredNote!,comments:savedComments.filter((c):c is NonNullable<typeof c>=>!!c),stopReason:undefined}:await captureNote(page.tabId!,{autoLoad:true,signal,initialComments,
           onDelta:async(note,comments)=>{
             assertRunning(signal);if(note.noteKey!==expected || comments.some(c=>c.noteKey!==expected))throw new AppError('PAGE_CHANGED','评论与任务笔记不一致，拒绝落库');
             await analysisRepos.saveCaptureDelta(childId,note,comments,signal);
           },
-          onProgress:async collection=>{if(signal.aborted)return;await analysisRepos.updateJob(childId,{collection});await analysisRepos.updateJob(jobId,{collection});progress(collection.discoveredCount,0,`${collection.loadingReplies?'正在加载回复':collection.loading?'正在加载评论':'正在累计评论'}……本轮新增 ${collection.addedCount} 条`);},
+          onProgress:async collection=>{
+            const active=()=>acceptingProgress&&!signal.aborted&&task.state.index===processingIndex&&task.state.post?.stage!=='completed';
+            if(!active())return;await analysisRepos.updateJob(childId,{collection});
+            if(!active())return;await analysisRepos.updateJob(jobId,{collection});
+            if(active())progress(collection.discoveredCount,0,`${collection.loadingReplies?'正在加载回复':collection.loading?'正在加载评论':'正在累计评论'}……本轮新增 ${collection.addedCount} 条`);
+          },
         });
         assertRunning(signal);if(snap.noteKey!==expected)throw new AppError('PAGE_CHANGED','采集笔记不一致');
         if(snap.stopReason==='time_limit'||snap.stopReason==='round_limit')throw new AppError('PARSE_FAILED','评论加载达到时间/轮次上限，请人工检查后继续');
         await checkpoint.captured(snap.comments.map(c=>c.commentKey));
-        await page.guard();assertRunning(signal);progress(snap.comments.length,0,'正在分析评论……');
+        await page.guard();assertRunning(signal);progress(snap.comments.length,0,'正在分析评论……');checkpoint.event('ANALYSIS_START');
         const refreshLeads=async()=>{
           const analyses=await analysisRepos.analysesFor(productId,snap.comments.map(c=>c.commentKey));
           if(!acceptingProgress || signal.aborted)return;
@@ -58,6 +78,7 @@ async function launch(spec:{jobId:string;productId:string;tabId:number;direction
         await refreshLeads();
         assertRunning(signal);
         if(result.status!=='completed')throw new AppError('PARSE_FAILED',`分析未完成（${result.errorCode??result.status}），已保存结果保留，请人工检查`);
+        checkpoint.event('ANALYSIS_COMPLETE');
         const analyses=await analysisRepos.analysesFor(productId,snap.comments.map(c=>c.commentKey));
         const leads=new Set(analyses.filter(a=>a.group==='high_intent'||a.group==='need').map(a=>a.commentKey)).size;
         progress(snap.comments.length,leads,'本帖分析完成，结果已保存到线索');
@@ -70,7 +91,7 @@ async function launch(spec:{jobId:string;productId:string;tabId:number;direction
     },
   },restored?.discovery);
   if(!restored)await analysisRepos.createJob({...baseJob(deps,jobId),ownerId:crypto.randomUUID(),kind:'discovery',productId,profileVersion:product.profileVersion,status:'collecting',totalItems:urls.length,discovery:{...task.state,direction,targets:urls,sourceTabId:tabId,navigation:{...page.navigation},completedNoteKeys:[]}});
-  if(restored)await page.reconcile(urls[task.state.index]?noteKeyFromUrl(urls[task.state.index]!):undefined);
+  if(restored){task.recordControl('continue');await task.flush();await page.reconcile(urls[task.state.index]?noteKeyFromUrl(urls[task.state.index]!):undefined);}
   current={id:jobId,task,page};void task.run().catch(()=>task.stop('本地存储异常，任务已停止'));
 }
 export function registerDiscoveryHandlers() {
@@ -90,6 +111,7 @@ export function registerDiscoveryHandlers() {
   });
   registerSensitiveHandler('DISCOVERY_CONTROL',async req=>{
     if(req.type!=='DISCOVERY_CONTROL')throw new Error('类型错误');
+    if(current?.id===req.payload.jobId)current.task.recordControl(req.payload.action);
     // 暂停/停止优先于继续等待：旧请求尚在退出时也不能锁死用户的停止按钮。
     if(current?.id===req.payload.jobId && req.payload.action!=='continue') {
       if(req.payload.action==='stop')current.task.stop();else current.task.pause();

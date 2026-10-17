@@ -3,6 +3,15 @@ import { LIMITS } from './limits';
 
 export const UtcIso = z.iso.datetime();
 
+export const DiscoveryTraceSchema=z.object({
+  event:z.string().max(64),at:z.number(),taskId:z.string().max(64),runId:z.string().max(64),source:z.string().max(64),
+  postIndex:z.number().int(),postKey:z.string().nullable(),postUrl:z.string().nullable(),phase:z.string(),
+  taskState:z.string(),captureState:z.string(),analysisState:z.string(),pauseReason:z.string().nullable(),commentCount:z.number(),
+  checkpoint:z.object({stage:z.string(),captureComplete:z.boolean(),analysisComplete:z.boolean()}),
+  navigation:z.object({phase:z.string(),expectedNoteKey:z.string().nullable(),actualUrl:z.string().nullable(),resolvedPostKey:z.string().nullable(),hasNote:z.boolean().optional(),isSearch:z.boolean().optional(),matchesSearch:z.boolean().optional()}),
+});
+export type DiscoveryTrace=z.infer<typeof DiscoveryTraceSchema>;
+
 export const EvidenceSchema = z.object({
   sourceId: z.string().min(1).max(64),
   quote: z.string().min(1).max(LIMITS.maxEvidenceQuoteChars),
@@ -190,6 +199,7 @@ export const JobSchema = z.object({
     navigation:DiscoveryNavigationSchema.optional(),
     completedNoteKeys:z.array(z.string().max(256)).max(5).optional(),
     post:z.object({stage:z.enum(['capturing','captured','completed']),commentKeys:z.array(z.string().max(512)).max(500)}).optional(),
+    trace:z.array(DiscoveryTraceSchema).max(200).optional(),
     targets:z.array(z.string().url().max(LIMITS.maxUrlChars)).max(5),sourceTabId:z.number().int().nonnegative(),
     phase:z.string().max(300),reason:z.string().max(500).nullable(),deadline:z.number(),direction:z.string().max(200),
   }).optional(),

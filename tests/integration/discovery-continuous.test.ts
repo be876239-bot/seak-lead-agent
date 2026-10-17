@@ -23,3 +23,15 @@ it('next navigation waits for the completed checkpoint to persist',async()=>{
  const pending=task.run();await vi.waitFor(()=>expect(reached).toBe(true));expect(deps.navigate).toHaveBeenCalledTimes(1);
  release();await pending;expect(deps.navigate).toHaveBeenCalledTimes(3);expect(task.state.status).toBe('completed');
 });
+it('a delayed old guard and progress cannot pause or overwrite the second post',async()=>{
+ vi.useFakeTimers();try{
+  let finishA!:()=>void,finishB!:()=>void,rejectOld!:(e:Error)=>void,lateProgress!: (n:number,l:number)=>void;
+  const a=new Promise<void>(r=>{finishA=r;}),b=new Promise<void>(r=>{finishB=r;});let pendingGuard=false;
+  const {task}=setup({guard:async()=>{if(pendingGuard){pendingGuard=false;await new Promise<void>((_r,reject)=>{rejectOld=reject;});}},process:async(u,_s,p)=>{if(u==='a'){lateProgress=p;await a;}if(u==='b')await b;}});
+  const run=task.run();await vi.advanceTimersByTimeAsync(0);pendingGuard=true;await vi.advanceTimersByTimeAsync(501);
+  finishA();await vi.advanceTimersByTimeAsync(0);expect(task.state.index).toBe(1);
+  rejectOld(new Error('旧笔记已卸载'));lateProgress(999,999);await vi.advanceTimersByTimeAsync(0);
+  expect(task.state.index).toBe(1);expect(task.state.status).toBe('running');expect(task.state.currentComments).toBe(0);
+  finishB();await run;
+ }finally{vi.useRealTimers();}
+});

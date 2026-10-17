@@ -36,3 +36,19 @@ it('cancel while Back is pending cannot click next note when it resolves late',a
 it('closed tab or missing permission is a clear error',async()=>{api.get.mockRejectedValue(new Error('No tab'));await expect(page().guard()).rejects.toThrow('No tab');api.get.mockResolvedValue({status:'complete'});await expect(page().guard()).rejects.toMatchObject({code:'PAGE_CHANGED'});});
 
 it('platform guard remains active while a normal click is awaiting page readiness',async()=>{const p=page(),s=new AbortController().signal;await p.navigate(url,s);blocked=true;await expect(p.guard()).rejects.toMatchObject({code:'PAGE_BLOCKED'});expect(clicks()).toHaveLength(1);});
+
+it('Back URL reaches search before the old note DOM closes: waits instead of reporting wrong history',async()=>{
+ const p=page(),s=new AbortController().signal;await p.navigate(url,s);await p.ready(url,s);
+ const original=api.sendMessage.getMockImplementation()!;let transient=true;
+ api.sendMessage.mockImplementation(async(id,req)=>req.type==='XHS_SEARCH_STATE'&&transient?buildOk(req.requestId,{sourceUrl:source,isSearch:true,hasNote:true}):original(id,req));
+ const pending=p.navigate(other,s);const checked=expect(pending).resolves.toBeUndefined();
+ await vi.advanceTimersByTimeAsync(500);expect(clicks()).toHaveLength(1);transient=false;
+ await vi.advanceTimersByTimeAsync(500);await checked;await p.ready(other,s);expect(clicks()).toHaveLength(2);expect(api.goBack).toHaveBeenCalledTimes(1);
+});
+it('resume a returning checkpoint waits for original search DOM without another Back',async()=>{
+ const p=new DiscoveryBrowser(7,{...initial(),phase:'returning',expectedNoteKey:'xhs:'+'a'.repeat(24)});
+ const original=api.sendMessage.getMockImplementation()!;let transient=true;
+ api.sendMessage.mockImplementation(async(id,req)=>req.type==='XHS_SEARCH_STATE'&&transient?buildOk(req.requestId,{sourceUrl:source,isSearch:false,hasNote:true}):original(id,req));
+ const pending=expect(p.reconcile()).resolves.toBeUndefined();await vi.advanceTimersByTimeAsync(500);transient=false;await vi.advanceTimersByTimeAsync(1000);await pending;
+ expect(p.navigation.phase).toBe('search');expect(api.goBack).not.toHaveBeenCalled();
+});

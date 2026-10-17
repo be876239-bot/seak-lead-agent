@@ -1,5 +1,7 @@
 # 觅客Agent 测试报告（T28 自动化回归 + T31 静态审查）
 
+**最新D016：33文件/364项通过，新增4项；typecheck/lint/build/Edge ZIP/diff检查通过。[返回搜索审计与真实证据边界](discovery-return-audit-2026-10-17.md)。E普通浏览器导航PARTIAL，F新版真实完整任务NOT VERIFIED。以下为历史记录。**
+
 **最新D015：33文件/360项通过，新增6项；typecheck/lint/build/Edge ZIP/diff检查通过。详情见 [连续任务报告](discovery-continuous-2026-10-17.md)。本轮F真实小红书NOT VERIFIED。以下为历史结果。**
 
 **最新结果：2026-10-17 D014，32 文件 / 354 项通过，新增18项。typecheck/lint/build/Edge ZIP/diff检查通过。多帖暂停/继续审计和证据见 [discovery-resume-2026-10-17.md](discovery-resume-2026-10-17.md)。F真实小红书流程NOT VERIFIED；本轮Edge页面可读取，用户暂无法配合新版扩展侧边栏验收。下面各节为历史阶段记录。**

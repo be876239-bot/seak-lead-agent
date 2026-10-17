@@ -83,3 +83,52 @@ it.each(['normal','captured-live','completed-live','captured-restored','complete
  expect((await repos.getJob(id))?.discovery?.navigation?.phase).toBe('search');expect((await repos.getJob(id))?.discovery?.completedNoteKeys).toHaveLength(2);
  await expect(repos.saveCaptureDelta(crypto.randomUUID(),{noteKey:'invalid'} as never,[],new AbortController().signal)).rejects.toBeInstanceOf(AppError);
 },10000);
+
+it('500 capture → AI → saved completion → delayed search DOM → second capture, without Continue or pause',async()=>{
+ vi.resetModules();const {registerDiscoveryHandlers}=await import('../../src/discovery/jobs');const {handleBackgroundMessage}=await import('../../src/messaging/handlers');
+ db=new SeekLeadDb('discovery-500-'+crypto.randomUUID());const repos=new Repositories(db);
+ const claim={value:null,status:'unknown',evidence:[]};
+ const provider=new MockProvider({profile:()=>({schemaVersion:1,name:claim,category:claim,summary:claim,capabilities:[],targetAudience:[],needsServed:[],exclusions:[],accessMethod:claim,price:claim,purchaseChannel:claim,searchSuggestions:['AI PPT']})});
+ shared.deps={repos,lock:new TaskLockManager(repos),provider,providerName:'mock',modelId:'mock',retryDelayMs:0};
+ const product=await runProfileGeneration(shared.deps,{inputUrl:'https://example.com',finalUrl:'https://example.com',blocks:[{id:'b001',url:'https://example.com',text:'合成产品',fetchedAt:new Date().toISOString()}]});
+ const source='https://www.xiaohongshu.com/search_result?keyword=AI';let currentUrl=source;let returning=false,backs=0;const clicked:string[]=[],captured:string[]=[];
+ function renderSearch(){manager?.dispose();currentUrl=source;returning=false;history.replaceState({},'',source);
+  document.body.innerHTML=ids.map(id=>`<section class="note-item"><a class="cover" href="/explore/${id}?source=synthetic">note</a></section>`).join('');
+  document.querySelectorAll<HTMLAnchorElement>('a.cover').forEach(a=>a.onclick=e=>{e.preventDefault();clicked.push(a.href);renderNote(a.href);});manager=new XhsSessionManager(()=>document);
+ }
+ function renderNote(url:string){manager?.dispose();currentUrl=url;history.replaceState({},'',url);
+  document.body.innerHTML=`<div id="noteContainer"><h1 id="detail-title">合成笔记</h1><div id="detail-desc">合成正文</div><div class="scroller" style="overflow-y:auto"><div class="comments-el"><div class="list-container">${items(1,url.includes(ids[0]!)?500:1)}</div></div></div></div>`;
+  const scroller=document.querySelector<HTMLElement>('.scroller')!;Object.defineProperties(scroller,{clientHeight:{value:500},scrollHeight:{value:500}});scroller.scrollBy=()=>{};
+  manager=new XhsSessionManager(()=>document);
+ }
+ renderSearch();Object.values(shared.tabs).forEach(fn=>fn.mockReset());
+ shared.tabs.get.mockImplementation(async()=>({id:7,url:currentUrl,status:'complete'}));
+ shared.tabs.goBack.mockImplementation(async()=>{backs++;currentUrl=source;returning=true;history.replaceState({},'',source);});
+ let transientReads=0;
+ shared.tabs.sendMessage.mockImplementation(async(_id,raw)=>{
+  const req=RequestSchema.parse(raw);
+  try{
+   if(req.type==='XHS_SEARCH_STATE'&&returning){
+    if(++transientReads%2===1)return buildOk(req.requestId,{sourceUrl:source,isSearch:true,hasNote:true});
+    renderSearch();
+   }
+   if(req.type==='XHS_START_SESSION')captured.push(currentUrl);
+   return buildOk(req.requestId,await manager.handle(req));
+  }catch(e){return buildError(req.requestId,toErrorPayload(e));}
+ });
+ const id=crypto.randomUUID();registerDiscoveryHandlers();const sender={id:'test',url:'chrome-extension://test/sidepanel.html'};
+ expect((await handleBackgroundMessage(buildRequest('DISCOVERY_START',{jobId:id,productId:product.id,tabId:7,direction:'AI PPT'}),sender)).ok).toBe(true);
+ let job=await repos.getJob(id);
+ for(let n=0;n<1000&&job?.discovery?.status!=='completed'&&job?.discovery?.status!=='paused';n++){await new Promise(r=>setTimeout(r,10));job=await repos.getJob(id);}
+ expect(job?.discovery?.status,JSON.stringify(job?.discovery)).toBe('completed');
+ const trace=job!.discovery!.trace!;
+ expect(trace.filter(e=>e.event==='PAUSE')).toHaveLength(0);
+ expect(clicked).toHaveLength(2);expect(captured).toHaveLength(2);expect(new URL(captured[1]!).pathname).toBe('/explore/'+ids[1]);expect(backs).toBe(2);
+ const second=trace.find(e=>e.event==='CAPTURE_START'&&e.postIndex===1)!;expect(second.taskState).toBe('running');expect(second.postKey).toBe('xhs:'+ids[1]);expect(second.navigation.resolvedPostKey).toBe(second.postKey);
+ const complete=trace.findIndex(e=>e.event==='POST_COMPLETE'&&e.postIndex===0);
+ const next=trace.findIndex(e=>e.event==='CAPTURE_START'&&e.postIndex===1);
+ expect(complete).toBeGreaterThan(0);expect(next).toBeGreaterThan(complete);expect(trace[complete]!.checkpoint.analysisComplete).toBe(true);
+ expect(await repos.commentsForNote('xhs:'+ids[0])).toHaveLength(500);expect(await repos.commentsForNote('xhs:'+ids[1])).toHaveLength(1);expect(await db.analyses.count()).toBe(501);
+ expect(()=>JobSchema.parse(job)).not.toThrow();expect(JSON.stringify(trace)).not.toMatch(/source=synthetic|xsec_token|需要购买PPT/);
+ expect(shared.tabs.create).not.toHaveBeenCalled();expect(shared.tabs.update).not.toHaveBeenCalled();
+},30000);

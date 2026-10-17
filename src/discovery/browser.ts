@@ -24,6 +24,7 @@ export class DiscoveryBrowser {
   readonly tabId:number;
   private loading=false;
   navigation:DiscoveryNavigation;
+  observation:{actualUrl:string|null;resolvedPostKey:string|null;hasNote?:boolean;isSearch?:boolean;matchesSearch?:boolean}={actualUrl:null,resolvedPostKey:null};
   constructor(sourceId:number,navigation:DiscoveryNavigation,private changed:(state:DiscoveryNavigation)=>Promise<void>=async()=>{}) {
     this.tabId=sourceId;this.navigation={...navigation};
   }
@@ -32,11 +33,13 @@ export class DiscoveryBrowser {
   }
   private async tab() {
     const tab=await browser.tabs.get(this.tabId);
+    if(tab.url){const parsed=new URL(tab.url);this.observation={actualUrl:parsed.origin+parsed.pathname,resolvedPostKey:noteUrl(tab.url)?noteKeyFromUrl(tab.url):null,matchesSearch:sameSearch(tab.url,this.navigation.sourceUrl)};}
     if(!tab.url?.startsWith('https://www.xiaohongshu.com/'))throw new AppError('PAGE_CHANGED','页面离开小红书或无法读取地址，任务已暂停');
     return tab;
   }
-  private async search(signal?:AbortSignal) {return SearchState.parse(await ask(this.tabId,buildRequest('XHS_SEARCH_STATE',{}),signal));}
+  private async search(signal?:AbortSignal) {const state=SearchState.parse(await ask(this.tabId,buildRequest('XHS_SEARCH_STATE',{}),signal));this.observation={...this.observation,hasNote:state.hasNote,isSearch:state.isSearch};return state;}
   async guard() {
+    const navigation=this.navigation;
     if(this.loading){
       await this.tab();
       try{await ask(this.tabId,buildRequest('XHS_GUARD',{}));}
@@ -44,12 +47,15 @@ export class DiscoveryBrowser {
       return; // 文档正常卸载期间允许脚本暂不可用；30秒的转换等待仍在生效。
     }
     const tab=await this.tab();await ask(this.tabId,buildRequest('XHS_GUARD',{}));
+    if(navigation!==this.navigation)return; // The transition has its own identity check.
     if(this.navigation.phase==='search') {
       const state=await this.search();
+      if(navigation!==this.navigation)return;
       if(!sameSearch(tab.url!,this.navigation.sourceUrl)||!sameSearch(state.sourceUrl,this.navigation.sourceUrl)||state.hasNote||!state.isSearch)throw new AppError('PAGE_CHANGED','当前页面不是原搜索结果，任务已暂停');
     }else {
       if(!noteUrl(tab.url!)||noteKeyFromUrl(tab.url!)!==this.navigation.expectedNoteKey)throw new AppError('PAGE_CHANGED','当前页面与任务笔记不一致');
       const status=await getNoteStatus(this.tabId);
+      if(navigation!==this.navigation)return;
       if(!status.supported||status.blocked||status.noteKey!==this.navigation.expectedNoteKey)throw new AppError('PARSE_FAILED','笔记结构异常或需要人工处理，任务已暂停');
     }
   }
@@ -57,7 +63,10 @@ export class DiscoveryBrowser {
   async reconcile(allowedNoteKey?:string) {
     const tab=await this.tab();await ask(this.tabId,buildRequest('XHS_GUARD',{}));
     if(sameSearch(tab.url!,this.navigation.sourceUrl)) {
-      const state=await this.search();if(state.isSearch&&!state.hasNote){await this.save('search',null);return;}
+      // A SPA may update its URL before unmounting the old note. Reconcile the
+      // pending return in place; another Back would leave the original search.
+      await this.poll('search',new AbortController().signal);
+      await this.save('search',null);return;
     }
     const expected=this.navigation.expectedNoteKey??allowedNoteKey;
     if(expected&&noteUrl(tab.url!)&&noteKeyFromUrl(tab.url!)===expected) {
@@ -96,7 +105,7 @@ export class DiscoveryBrowser {
             if(target==='search') {
               const state=await this.search(signal);
               if(sameSearch(tab.url!,this.navigation.sourceUrl)&&sameSearch(state.sourceUrl,this.navigation.sourceUrl)&&state.isSearch&&!state.hasNote)return;
-              if(!noteUrl(tab.url!)||noteKeyFromUrl(tab.url!)!==this.navigation.expectedNoteKey)throw new AppError('PAGE_CHANGED','返回后不是原搜索结果，已暂停，不会猜测其他入口');
+              if(!sameSearch(tab.url!,this.navigation.sourceUrl) && (!noteUrl(tab.url!)||noteKeyFromUrl(tab.url!)!==this.navigation.expectedNoteKey))throw new AppError('PAGE_CHANGED','返回后不是原搜索结果，已暂停，不会猜测其他入口');
             }else if(noteUrl(tab.url!)&&noteKeyFromUrl(tab.url!)===this.navigation.expectedNoteKey) {
               const status=await getNoteStatus(this.tabId,signal);assertRunning(signal);
               if(status.blocked)throw new AppError('PAGE_BLOCKED','平台限制：请人工处理登录或验证');
