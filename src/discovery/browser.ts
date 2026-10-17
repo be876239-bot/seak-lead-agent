@@ -129,7 +129,21 @@ export class DiscoveryBrowser {
     assertRunning(signal);if(this.navigation.phase==='search'){await this.guard();assertRunning(signal);return;}
     await this.guard();assertRunning(signal);this.loading=true;
     try {
-      await this.save('returning');assertRunning(signal);await browser.tabs.goBack(this.tabId);assertRunning(signal);
+      await this.save('returning');assertRunning(signal);
+      try {await browser.tabs.goBack(this.tabId);}
+      catch(e) {
+        // Some SPA note entries have no browser-history predecessor. Use one
+        // normal, fixture-confirmed dismiss action, never a forced URL or retry.
+        if(!(e instanceof Error)||!/^Cannot find a next page in history\.?$/.test(e.message))throw e;
+        assertRunning(signal);const tab=await this.tab();assertRunning(signal);
+        if(!sameSearch(tab.url!,this.navigation.sourceUrl)) {
+          const key=this.navigation.expectedNoteKey;
+          if(!key||!noteUrl(tab.url!)||noteKeyFromUrl(tab.url!)!==key)throw new AppError('PAGE_CHANGED','关闭前页面与原任务笔记不一致');
+          const result=z.object({clicked:z.literal(true),noteKey:z.string()}).parse(await ask(this.tabId,buildRequest('XHS_CLOSE_NOTE',{expectedNoteKey:key}),signal));
+          if(result.noteKey!==key)throw new AppError('PAGE_CHANGED','关闭响应的笔记身份不一致');
+        }
+      }
+      assertRunning(signal);
       await this.poll('search',signal);assertRunning(signal);await this.save('search',null);
     }finally{this.loading=false;}
   }

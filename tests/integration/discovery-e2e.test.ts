@@ -84,7 +84,7 @@ it.each(['normal','captured-live','completed-live','captured-restored','complete
  await expect(repos.saveCaptureDelta(crypto.randomUUID(),{noteKey:'invalid'} as never,[],new AbortController().signal)).rejects.toBeInstanceOf(AppError);
 },10000);
 
-it('500 capture → AI → saved completion → delayed search DOM → second capture, without Continue or pause',async()=>{
+it.each(['delayed-search','missing-history'])('500 capture → AI → saved completion → %s → second capture, without Continue or pause',async mode=>{
  vi.resetModules();const {registerDiscoveryHandlers}=await import('../../src/discovery/jobs');const {handleBackgroundMessage}=await import('../../src/messaging/handlers');
  db=new SeekLeadDb('discovery-500-'+crypto.randomUUID());const repos=new Repositories(db);
  const claim={value:null,status:'unknown',evidence:[]};
@@ -97,13 +97,14 @@ it('500 capture → AI → saved completion → delayed search DOM → second ca
   document.querySelectorAll<HTMLAnchorElement>('a.cover').forEach(a=>a.onclick=e=>{e.preventDefault();clicked.push(a.href);renderNote(a.href);});manager=new XhsSessionManager(()=>document);
  }
  function renderNote(url:string){manager?.dispose();currentUrl=url;history.replaceState({},'',url);
-  document.body.innerHTML=`<div id="noteContainer"><h1 id="detail-title">合成笔记</h1><div id="detail-desc">合成正文</div><div class="scroller" style="overflow-y:auto"><div class="comments-el"><div class="list-container">${items(1,url.includes(ids[0]!)?500:1)}</div></div></div></div>`;
+  document.body.innerHTML=`<div class="note-detail-mask"><div id="noteContainer"><h1 id="detail-title">合成笔记</h1><div id="detail-desc">合成正文</div><div class="scroller" style="overflow-y:auto"><div class="comments-el"><div class="list-container">${items(1,url.includes(ids[0]!)?500:1)}</div></div></div></div><div class="close-circle"><div class="close"></div></div></div>`;
+  document.querySelector<HTMLElement>('.close')!.onclick=()=>{currentUrl=source;returning=true;history.replaceState({},'',source);};
   const scroller=document.querySelector<HTMLElement>('.scroller')!;Object.defineProperties(scroller,{clientHeight:{value:500},scrollHeight:{value:500}});scroller.scrollBy=()=>{};
   manager=new XhsSessionManager(()=>document);
  }
  renderSearch();Object.values(shared.tabs).forEach(fn=>fn.mockReset());
  shared.tabs.get.mockImplementation(async()=>({id:7,url:currentUrl,status:'complete'}));
- shared.tabs.goBack.mockImplementation(async()=>{backs++;currentUrl=source;returning=true;history.replaceState({},'',source);});
+ shared.tabs.goBack.mockImplementation(async()=>{backs++;if(mode==='missing-history')throw new Error('Cannot find a next page in history.');currentUrl=source;returning=true;history.replaceState({},'',source);});
  let transientReads=0;
  shared.tabs.sendMessage.mockImplementation(async(_id,raw)=>{
   const req=RequestSchema.parse(raw);
@@ -131,4 +132,5 @@ it('500 capture → AI → saved completion → delayed search DOM → second ca
  expect(await repos.commentsForNote('xhs:'+ids[0])).toHaveLength(500);expect(await repos.commentsForNote('xhs:'+ids[1])).toHaveLength(1);expect(await db.analyses.count()).toBe(501);
  expect(()=>JobSchema.parse(job)).not.toThrow();expect(JSON.stringify(trace)).not.toMatch(/source=synthetic|xsec_token|需要购买PPT/);
  expect(shared.tabs.create).not.toHaveBeenCalled();expect(shared.tabs.update).not.toHaveBeenCalled();
+ expect(shared.tabs.sendMessage.mock.calls.filter(([,r])=>r.type==='XHS_CLOSE_NOTE')).toHaveLength(mode==='missing-history'?2:0);
 },30000);
