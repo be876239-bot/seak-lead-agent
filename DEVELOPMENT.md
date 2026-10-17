@@ -1,5 +1,7 @@
 # 觅客Agent MVP 开发文档
 
+**D017组合交付补充**：独立修复dfebad5已与并发e90eca3通过ad65700合并回codex/eric-development，主目录378项全量测试及typecheck/lint/Edge build/ZIP通过。最终交付使用主目录.output/edge-mv3及ZIP，取代隔离验证包。真实新版仍NOT VERIFIED。
+
 **2026-10-17 最新（D017）**：真实日志确认Back无历史导致execute暂停；仅针对该精确错误增加一次已确认笔记关闭控件的正常DOM点击，再严格确认原搜索页。正常Back/串行状态机不改，非该错误/平台验证仍暂停。新增13项，总377通过，真实新版NOT VERIFIED。并发工作隔离于codex/history-return-fix，见 `docs/discovery-missing-history-2026-10-17.md`。
 
 **2026-10-17 最新（D016）**：用户真实失败原因为“返回后不是原搜索结果”。已复现并修复原搜索URL已返回但笔记DOM尚未卸载的误判，以及恢复同阶段不等待的问题；真正错误地址仍暂停。新增最多200条本地结构化诊断、原帖迟到guard复查和回调守卫。364项测试通过（含真实模块500→分析→延迟返回→下一帖），本轮新版完整真实任务NOT VERIFIED。原现场实际URL/DOM未保存，不能断言其唯一触发因素。见 `docs/discovery-return-audit-2026-10-17.md`。

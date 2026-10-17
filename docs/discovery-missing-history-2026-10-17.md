@@ -29,7 +29,7 @@
 
 F新版真实小红书：NOT VERIFIED。本轮用户日志是真实失败证据，历史真实fixture是结构证据，合成生产集成是回归证据，均不能替代新版已登录平台全流程验收。
 
-## Git与包
+## Git与包（隔离验证阶段，最终交付见下节）
 
 为保留并发工作，新建工作树D:\AI-Toys\seak-lead-agent\.scratch\history-return，分支codex/history-return-fix，从5b731f0创建。本轮修改已从主目录按专属patch反向移除，其他并发修改保留；没有切换主目录分支、reset、clean或push。
 
@@ -38,3 +38,16 @@ F新版真实小红书：NOT VERIFIED。本轮用户日志是真实失败证据�
 SHA256：1f294c38df0bf2a195f5e45faf3a5e7c12b234b9f88e5765b0d1ecc465e64193。
 
 主目录另有并发代码，本轮不覆盖其.output/edge-mv3目录。验收本修复请加载独立树.output/edge-mv3或解压上述ZIP，不要只重新加载主目录旧构建。重载后刷新小红书标签，启动新任务观察无历史时是否正常关闭并自动下一帖；遇平台验证立即停止。并发工作完成前不自动合并到主目录，主目录不能声明干净。
+
+## 最终组合交付
+
+并发工作随后完成为e90eca3，主目录恢复干净。本轮修复dfebad5已通过ad65700正常合并到codex/eric-development，无冲突，保留e90eca3的评论总数显示/分析前检查改动；没有重写或覆盖他人提交。
+
+主目录组合版本重新运行：npm test/Vitest **33文件378/378通过**（独立修复377项，加上并发提交新增1项）；typecheck、lint、build:edge、zip:edge、git diff --check全部通过。最终包是主目录组合版本，取代上节隔离包。
+
+- ZIP：D:\AI-Toys\seak-lead-agent\.output\seeklead-agent-0.1.0-edge.zip。
+- 解压加载目录：D:\AI-Toys\seak-lead-agent\.output\edge-mv3。
+- 最终SHA256：d9f63f1bcaf55137f4ee03a913664fa1a415f7b081cfa2d4a4592ef1aae1ac42。
+- 新版真实小红书仍NOT VERIFIED，不将自动集成冒充平台验收。
+
+现在可直接重新加载主目录新版edge-mv3并刷新小红书页面；无需使用隔离树。独立树保留作修复证据，未删除任何并发数据。
