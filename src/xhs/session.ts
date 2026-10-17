@@ -1,4 +1,4 @@
-import { clickSearchNote, searchState } from './navigation';
+import { clickSearchNote, closeNote, searchState } from './navigation';
 import { platformBlock, readSearchNotes } from './discovery-dom';
 import { AppError } from '../domain/errors';
 import { LIMITS } from '../domain/limits';
@@ -80,6 +80,7 @@ export class XhsSessionManager {
       case 'XHS_GET_STATUS': return this.status();
       case 'XHS_DISCOVER': return { urls: readSearchNotes(this.getDoc(), this.getDoc().URL), sourceUrl:this.getDoc().URL };
       case 'XHS_SEARCH_STATE': return searchState(this.getDoc());
+      case 'XHS_CLOSE_NOTE': return closeNote(this.getDoc(),req.payload.expectedNoteKey);
       case 'XHS_CLICK_NOTE': return clickSearchNote(this.getDoc(),req.payload.expectedSearchUrl,req.payload.expectedNoteKey);
       case 'XHS_GUARD': { const reason=platformBlock(this.getDoc()); if(reason) throw new AppError('PAGE_BLOCKED',reason); return {ok:true}; }
       case 'XHS_START_SESSION': return this.start(req.payload.expectedNoteKey);

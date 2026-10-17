@@ -1,5 +1,10 @@
 # 决策记录
 
+## D017 2026-10-17 Back无历史时关闭已确认笔记
+- 用户真实PAUSE明确为Cannot find a next page in history，索引已到4。正常完成不暂停；错误发生在进入下一帖前的返回步骤。
+- 正常Back保持，仅精确无历史错误允许一次XHS_CLOSE_NOTE；当前URL/noteKey匹配、历史真实fixture确认的关闭控件、平台守卫和原搜索严格校验均保留。禁止强跳URL、通用取消按钮、无限重试和账号互动。
+- 并发评论统计修改保留，独立codex/history-return-fix工作树验证与提交。新增13项、总377通过，真实新版NOT VERIFIED。见discovery-missing-history-2026-10-17.md。
+
 ## D016 2026-10-17 返回搜索DOM过渡等待与诊断
 - 用户提供真实暂停原因“返回后不是原搜索结果”，定位browser.poll('search')，非500采集或Continue误连。复现原搜索URL先到、旧笔记DOM后关闭的误判；只在同一原搜索URL内沿用30秒预算等待，reconcile同样等待且不重复Back。实际错误地址/平台验证仍暂停，不强跳URL。
 - 新增结构化任务trace最多200条、同阶段进度合并，存本地Job并在侧边栏可展开；移除所有URL查询参数，不记录评论正文/凭据。旧帖guard错误复查当前页，旧signal/索引隔离回调。

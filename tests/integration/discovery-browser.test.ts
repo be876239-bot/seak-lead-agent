@@ -37,6 +37,27 @@ it('closed tab or missing permission is a clear error',async()=>{api.get.mockRej
 
 it('platform guard remains active while a normal click is awaiting page readiness',async()=>{const p=page(),s=new AbortController().signal;await p.navigate(url,s);blocked=true;await expect(p.guard()).rejects.toMatchObject({code:'PAGE_BLOCKED'});expect(clicks()).toHaveLength(1);});
 
+it('missing Back history closes the matching note once, confirms search, then opens B automatically',async()=>{
+ const p=page(),s=new AbortController().signal;await p.navigate(url,s);await p.ready(url,s);
+ api.goBack.mockRejectedValue(new Error('Cannot find a next page in history.'));
+ const original=api.sendMessage.getMockImplementation()!;
+ api.sendMessage.mockImplementation(async(id,req)=>{if(req.type==='XHS_CLOSE_NOTE'){current=source;return buildOk(req.requestId,{clicked:true,noteKey:'xhs:'+'a'.repeat(24)});}return original(id,req);});
+ await p.navigate(other,s);await p.ready(other,s);expect(clicks()).toHaveLength(2);
+ expect(api.sendMessage.mock.calls.filter(([,r])=>r.type==='XHS_CLOSE_NOTE')).toHaveLength(1);expect(api.goBack).toHaveBeenCalledTimes(1);expect(api.update).not.toHaveBeenCalled();
+});
+it.each(['permission','cancelled','platform','wrong-search','no-control'])('missing-history close boundary: %s never forces navigation',async mode=>{
+ const p=page(),ac=new AbortController();await p.navigate(url,ac.signal);await p.ready(url,ac.signal);
+ api.goBack.mockImplementation(async()=>{if(mode==='cancelled')ac.abort();throw new Error(mode==='permission'?'Permission denied':'Cannot find a next page in history.');});
+ const original=api.sendMessage.getMockImplementation()!;
+ api.sendMessage.mockImplementation(async(id,req)=>{if(req.type==='XHS_CLOSE_NOTE'){
+  if(mode==='platform')return buildError(req.requestId,toErrorPayload(new AppError('PAGE_BLOCKED','安全验证')));
+  if(mode==='no-control')return buildError(req.requestId,toErrorPayload(new AppError('PAGE_UNSUPPORTED','无关闭入口')));
+  current=source+'-wrong';return buildOk(req.requestId,{clicked:true,noteKey:'xhs:'+'a'.repeat(24)});
+ }return original(id,req);});
+ await expect(p.navigate(other,ac.signal)).rejects.toThrow();expect(clicks()).toHaveLength(1);expect(api.goBack).toHaveBeenCalledTimes(1);expect(api.update).not.toHaveBeenCalled();
+ expect(api.sendMessage.mock.calls.filter(([,r])=>r.type==='XHS_CLOSE_NOTE')).toHaveLength(mode==='permission'||mode==='cancelled'?0:1);
+});
+
 it('Back URL reaches search before the old note DOM closes: waits instead of reporting wrong history',async()=>{
  const p=page(),s=new AbortController().signal;await p.navigate(url,s);await p.ready(url,s);
  const original=api.sendMessage.getMockImplementation()!;let transient=true;
