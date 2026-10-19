@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AppError } from '../../src/domain/errors';
 import { BailianProvider, stripCodeFence } from '../../src/ai/bailian';
 import { MockProvider } from '../../src/ai/mock';
-import { COMMENT_SYSTEM_PROMPT, buildCommentMessages, buildProfileMessages } from '../../src/ai/prompts';
+import { COMMENT_SYSTEM_PROMPT, appendRepair, buildCommentMessages, buildProfileMessages } from '../../src/ai/prompts';
 import type { ClassificationInput } from '../../src/privacy/ai-payload';
 import { LIMITS } from '../../src/domain/limits';
 
@@ -182,6 +182,17 @@ describe('提示词组装', () => {
     expect(msgs[1]!.content).toContain('模拟样例');
     const data = JSON.parse(msgs[msgs.length - 1]!.content);
     expect(data.items[0].text).toBe(evil);
+  });
+  it('校验修复提示明确要求逐字核验引文，不得编造或保留无证据的确定结论', () => {
+    const msgs = appendRepair(buildCommentMessages(classificationInput()), 'commentId c001 引文不是原文连续段', '{"results":[]}');
+    const repair = msgs.at(-1)!;
+    expect(repair.role).toBe('user');
+    expect(repair.content).toContain('逐字复制');
+    expect(repair.content).toContain('不能改写、概括、翻译');
+    expect(repair.content).toContain('同一来源原文中按顺序连续命中');
+    expect(repair.content).toContain('降为 unknown');
+    expect(repair.content).toContain('不得在没有可验证证据时保留确定性的购买意向或高意向判断');
+    expect(repair.content).toContain('最终只返回完整 JSON');
   });
   it('profile 输入整体序列化进 user 消息', () => {
     const msgs = buildProfileMessages(profileInput);

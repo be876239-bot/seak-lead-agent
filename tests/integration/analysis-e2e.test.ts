@@ -12,6 +12,7 @@ import { Repositories } from '../../src/storage/repositories';
 import { LOCK_NAME, TaskLockManager } from '../../src/analysis/lock';
 import { retryCommentsJob, runCommentsJob, runProfileGeneration, type RunnerDeps } from '../../src/analysis/runner';
 import { MockProvider } from '../../src/ai/mock';
+import {buildCommentMessages} from '../../src/ai/prompts';
 
 const NOTE_ID = 'a'.repeat(24);
 const NOTE_KEY = `xhs:${NOTE_ID}`;
@@ -83,6 +84,86 @@ async function makeProduct(provider: MockProvider) {
 }
 
 describe('G2 mock 端到端闭环（产品→当前页→分析→保存→再运行去重）', () => {
+  it('未关联回复可分析，AI获知上下文缺失且本地判断明确标注不确定性', async()=>{
+    const provider=new MockProvider({profile:profileScript,classification:input=>{
+      expect(input.items[0]).toMatchObject({parent:null,replyContext:'parent_unavailable'});
+      const sent=JSON.parse(buildCommentMessages(input).at(-1)!.content);
+      expect(sent.items[0].contextNotice).toContain('不得猜测父评论');
+      expect(sent.items[0].parent).toBeNull();
+      return goldClassification(input);
+    }});
+    const product=await makeProduct(provider);const snap=await captureFromFixture();
+    const comment={...snap.comments[0]!,isReply:true,parentKey:null};await repos.putComments([comment]);
+    const job=await runCommentsJob(deps(provider),{productId:product.id,note:snap.note!,comments:[comment]});
+    expect(job.status).toBe('completed');
+    expect((await db.analyses.toArray())[0]?.decision.uncertainty).toContain('缺少父评论上下文');
+  });
+  it('未知父上下文结果可缓存；补关联后使用新上下文重新分析',async()=>{
+    let calls=0;
+    const provider=new MockProvider({profile:profileScript,classification:input=>{calls++;return goldClassification(input);}});
+    const product=await makeProduct(provider);const snap=await captureFromFixture();
+    const reply={...snap.comments[0]!,isReply:true,parentKey:null};
+    await runCommentsJob(deps(provider),{productId:product.id,note:snap.note!,comments:[reply]});
+    await runCommentsJob(deps(provider),{productId:product.id,note:snap.note!,comments:[reply]});
+    expect(calls).toBe(1);
+    const parent={...snap.comments[1]!,text:'父评论上下文'};
+    await runCommentsJob(deps(provider),{productId:product.id,note:snap.note!,comments:[{...reply,parentKey:parent.commentKey},parent]});
+    expect(calls).toBe(2);
+    const rows=(await db.analyses.toArray()).filter(a=>a.commentKey===reply.commentKey);
+    expect(rows).toHaveLength(2);expect(rows[0]!.contextHash).not.toBe(rows[1]!.contextHash);
+  });
+  it.each(['recover', 'invalid-json', 'invalid-schema'] as const)('Provider JSON 解析失败共享一次修复预算：%s', async (mode) => {
+    const provider = new MockProvider({ profile: profileScript });
+    const product = await makeProduct(provider);
+    const snap = await captureFromFixture();
+    let calls = 0;
+    provider.classifyComments = async (input, _signal, repair) => {
+      calls += 1;
+      if (calls === 1 || mode === 'invalid-json') throw new AppError('AI_INVALID_OUTPUT', '模型输出无法解析为 JSON');
+      expect(repair).toEqual({ errorSummary: '模型输出无法解析为 JSON', badOutput: '' });
+      return { value: mode === 'invalid-schema' ? {} : goldClassification(input), model: 'mock-model', usage: { inputTokens: null, outputTokens: null } };
+    };
+    // 单批，避免其他批次消耗调用序列。
+    const comments = snap.comments.slice(0, 7);
+    const job = await runCommentsJob(deps(provider), { productId: product.id, note: snap.note!, comments });
+    expect(calls).toBe(2);
+    expect(job.status).toBe(mode === 'recover' ? 'completed' : 'failed');
+    expect((await db.analyses.toArray()).length).toBe(mode === 'recover' ? 7 : 0);
+    expect((await db.usage.toArray()).filter(u => u.jobId === job.id)).toHaveLength(2);
+    expect((await db.comments.toArray()).length).toBe(snap.comments.length);
+  });
+
+  it('评论引文不匹配时，使用引文专用修复提示纠正后完成批次', async () => {
+    const provider = new MockProvider({ profile: profileScript });
+    const product = await makeProduct(provider);
+    const snap = await captureFromFixture();
+    let calls = 0;
+    provider.classifyComments = async (input, _signal, repair) => {
+      calls += 1;
+      const good = goldClassification(input);
+      if (!repair) {
+        const bad = structuredClone(good);
+        bad.results[0]!.evidence[0]!.quote = '这是一段原文中不存在的改写引文';
+        return { value: bad, model: 'mock-model', usage: { inputTokens: 10, outputTokens: 5 } };
+      }
+      expect(repair.errorSummary).toContain('引文不是原文连续段');
+      expect(repair.errorSummary).not.toContain('这是一段原文中不存在的改写引文');
+      expect(repair.badOutput).toContain('这是一段原文中不存在的改写引文');
+      return { value: good, model: 'mock-model', usage: { inputTokens: 12, outputTokens: 5 } };
+    };
+
+    const comments = snap.comments.slice(0, 7);
+    const job = await runCommentsJob(deps(provider), { productId: product.id, note: snap.note!, comments });
+    expect(calls).toBe(2);
+    expect(job.status).toBe('completed');
+    expect((await db.analyses.toArray())).toHaveLength(7);
+    const usage = (await db.usage.toArray()).filter((u) => u.jobId === job.id);
+    expect(usage).toHaveLength(2);
+    expect(usage.some((u) => u.status === 'unknown')).toBe(true);
+    expect(usage.some((u) => u.status === 'success')).toBe(true);
+    expect((await db.comments.toArray()).length).toBe(snap.comments.length);
+  });
+
   it.each(['profile', 'model', 'comment', 'legacy', 'lock'] as const)('重试守卫拒绝 %s 变化，保留原批次且不调用模型', async (change) => {
     const setup = new MockProvider({ profile: profileScript, classification: () => { throw new AppError('AI_TIMEOUT', '模拟失败'); } });
     const product = await makeProduct(setup);

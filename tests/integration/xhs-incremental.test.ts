@@ -2,6 +2,7 @@
 import 'fake-indexeddb/auto';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { AppError, toErrorPayload } from '../../src/domain/errors';
+import { LIMITS } from '../../src/domain/limits';
 import type { Comment, Note } from '../../src/domain/schemas';
 import { buildError, buildOk, RequestSchema } from '../../src/messaging/protocol';
 import { XhsSessionManager } from '../../src/xhs/session';
@@ -96,14 +97,14 @@ it('G：等待期间取消会STOP，已保存首屏保留，后续DOM不再写�
   expect(sendMessage.mock.calls.at(-1)![1].type).toBe('XHS_STOP_SESSION');
 });
 
-it('H：达到500立即停止，保留500条且不继续滚动', async () => {
+it('H：达到单帖安全上限后停止，保留已采集评论且不继续滚动', async () => {
   scroll.mockImplementation(() => { const start = scroll.mock.calls.length * 20 + 1; replace(start, start+19); });
   const result = await captureNote(7, { autoLoad: true, wait, onDelta: persist });
   expect(result.stopReason).toBe('limit');
-  expect(result.comments).toHaveLength(500);
-  expect(await db.comments.count()).toBe(500);
-  expect(scroll.mock.calls.length).toBe(24);
-});
+  expect(result.comments).toHaveLength(LIMITS.maxSessionComments);
+  expect(await db.comments.count()).toBe(LIMITS.maxSessionComments);
+  expect(scroll.mock.calls.length).toBe(Math.ceil(LIMITS.maxSessionComments / 20) - 1);
+}, 20000);
 
 it('I：评论容器消失报明确错误并STOP，保留此前落库数据', async () => {
   scroll.mockImplementation(() => document.querySelector('.comments-el')!.remove());
@@ -177,8 +178,8 @@ it('少量评论不足一屏仍可正常停止，不误报滚动容器缺失', a
   expect(result.comments).toHaveLength(20);
 });
 
-it('恢复采集保留已落库评论，并在滚动前按剩余额度截断写入，累计最多500', async () => {
-  const previous: Comment[] = Array.from({length:490},(_,i)=>({commentKey:`old-${i}`,noteKey:'xhs:aaaaaaaaaaaaaaaaaaaaaaaa',platformCommentId:`old-${i}`,parentKey:null,text:'已保存的合成评论',authorDisplayName:null,authorLocalKey:null,profileUrl:null,publishedText:null,publishedAt:null,likeCount:null,capturedAt:new Date().toISOString(),identityQuality:'strong',truncated:false}));
+it('恢复采集保留已落库评论，并在滚动前按剩余额度截断写入，累计最多2000', async () => {
+  const previous: Comment[] = Array.from({length:LIMITS.maxSessionComments-10},(_,i)=>({commentKey:`old-${i}`,noteKey:'xhs:aaaaaaaaaaaaaaaaaaaaaaaa',platformCommentId:`old-${i}`,parentKey:null,text:'已保存的合成评论',authorDisplayName:null,authorLocalKey:null,profileUrl:null,publishedText:null,publishedAt:null,likeCount:null,capturedAt:new Date().toISOString(),identityQuality:'strong',truncated:false}));
   const result=await captureNote(7,{autoLoad:true,wait,initialComments:previous,onDelta:persist});
-  expect(result.comments).toHaveLength(500); expect(await db.comments.count()).toBe(10);expect(scroll).not.toHaveBeenCalled();
+  expect(result.comments).toHaveLength(LIMITS.maxSessionComments); expect(await db.comments.count()).toBe(10);expect(scroll).not.toHaveBeenCalled();
 });

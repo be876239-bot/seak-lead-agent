@@ -1,3 +1,4 @@
+import {LIMITS} from '../domain/limits';
 import { browser } from 'wxt/browser';
 import { z } from 'zod';
 import { AppError } from '../domain/errors';
@@ -5,7 +6,7 @@ import type { DiscoveryNavigation } from '../domain/schemas';
 import { buildRequest } from '../messaging/protocol';
 import { ask, getNoteStatus } from '../xhs/capture';
 import { noteKeyFromUrl, noteUrl } from '../xhs/discovery-dom';
-import { sameSearch } from '../xhs/navigation';
+import { MISSING_SEARCH_CARD_MESSAGE, sameSearch } from '../xhs/navigation';
 
 export function assertRunning(signal: AbortSignal) {
   if(signal.aborted) throw new AppError('CANCELLED','任务已暂停或停止');
@@ -19,6 +20,7 @@ export function wait(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 const SearchState=z.object({sourceUrl:z.string().url(),isSearch:z.boolean(),hasNote:z.boolean()});
+const SearchScrollResult=z.object({scrollable:z.boolean(),moved:z.boolean(),atTop:z.boolean(),atBottom:z.boolean(),scrollTop:z.number(),maxTop:z.number()});
 /** 复用原搜索标签，只点击当前真实入口和正常后退；不创建标签、不直接写目标URL。 */
 export class DiscoveryBrowser {
   readonly tabId:number;
@@ -74,6 +76,42 @@ export class DiscoveryBrowser {
     }
     throw new AppError('PAGE_CHANGED','无法与原搜索结果或待处理笔记对应，请人工检查后继续；队列保留');
   }
+  private missingSearchCard(error:unknown):error is AppError {
+    return error instanceof AppError&&error.code==='PAGE_CHANGED'&&error.message===MISSING_SEARCH_CARD_MESSAGE;
+  }
+  private async clickSearchTarget(expectedNoteKey:string,signal:AbortSignal) {
+    const click=async()=>z.object({clicked:z.literal(true),noteKey:z.string()}).parse(
+      await ask(this.tabId,buildRequest('XHS_CLICK_NOTE',{expectedSearchUrl:this.navigation.sourceUrl,expectedNoteKey}),signal),
+    );
+    const scroll=async(direction:'down'|'top')=>SearchScrollResult.parse(
+      await ask(this.tabId,buildRequest('XHS_SCROLL_SEARCH',{expectedSearchUrl:this.navigation.sourceUrl,direction}),signal),
+    );
+    try { return await click(); }
+    catch(initialError) {
+      if(!this.missingSearchCard(initialError))throw initialError;
+      // Two bounded passes: continue from the current position, then rescan from the top.
+      // Each scroll is a separate cancellable message; a late click cannot occur after Pause.
+      for(let pass=0;pass<2;pass++) {
+        assertRunning(signal);
+        if(pass===1) {
+          const top=await scroll('top');assertRunning(signal);
+          if(!top.scrollable)break;
+          await wait(LIMITS.searchScrollWaitMs,signal);
+          try { return await click(); }
+          catch(error) { if(!this.missingSearchCard(error))throw error; }
+        }
+        for(let step=0;step<40;step++) {
+          assertRunning(signal);
+          const result=await scroll('down');assertRunning(signal);
+          if(!result.scrollable||!result.moved)break;
+          await wait(LIMITS.searchScrollWaitMs,signal);assertRunning(signal);
+          try { return await click(); }
+          catch(error) { if(!this.missingSearchCard(error))throw error; }
+        }
+      }
+      throw new AppError('PAGE_CHANGED','已自动滚动并重新检查搜索结果，仍找不到队列中的这篇笔记。可能搜索结果已变化或小红书未重新加载它。请确认原搜索结果页后继续；任务进度与已保存线索保留。');
+    }
+  }
   async navigate(url:string,signal:AbortSignal) {
     assertRunning(signal);const expected=noteKeyFromUrl(url);
     if(this.navigation.phase==='note'&&this.navigation.expectedNoteKey===expected){await this.guard();assertRunning(signal);return;}
@@ -82,7 +120,7 @@ export class DiscoveryBrowser {
     try {
       await this.save('opening',expected);assertRunning(signal);
       try {
-        z.object({clicked:z.literal(true),noteKey:z.string()}).parse(await ask(this.tabId,buildRequest('XHS_CLICK_NOTE',{expectedSearchUrl:this.navigation.sourceUrl,expectedNoteKey:expected}),signal));
+        await this.clickSearchTarget(expected,signal);
       } catch(e) {
         // 正常链接可能卸载旧文档、导致响应端口关闭。只确认已经进入同一目标，绝不补点或强跳URL。
         if(!(e instanceof AppError)||e.code!=='PAGE_UNSUPPORTED')throw e;

@@ -1,7 +1,7 @@
 // @vitest-environment-options {"url":"https://www.xiaohongshu.com/search_result?keyword=AI"}
 import{readFileSync}from'node:fs';
 import{beforeEach,it,expect,vi}from'vitest';
-import{clickSearchNote,closeNote,searchState}from'../../src/xhs/navigation';
+import{clickSearchNote,closeNote,searchState,scrollSearchResults}from'../../src/xhs/navigation';
 import{platformBlock}from'../../src/xhs/discovery-dom';
 const source='https://www.xiaohongshu.com/search_result?keyword=AI';const id='a'.repeat(24);const key='xhs:'+id;
 beforeEach(()=>{history.replaceState({},'','/search_result?keyword=AI');document.body.innerHTML=`<section class="note-item"><a class="cover mask ld" href="/explore/${id}?source=current">公开笔记</a><a href="/user/profile/synthetic">作者</a></section>`;});
@@ -27,4 +27,19 @@ it.each(['missing','hidden','disabled','mismatch','platform'])('close safety: %s
  const control=document.querySelector<HTMLElement>('.close')!;const clicked=vi.fn();document.body.onclick=clicked;
  if(mode==='missing')control.remove();if(mode==='hidden')control.setAttribute('hidden','');if(mode==='disabled')control.setAttribute('disabled','');if(mode==='platform')document.body.insertAdjacentHTML('afterbegin','<div role="dialog">安全验证</div>');
  expect(()=>closeNote(document,mode==='mismatch'?'xhs:'+'b'.repeat(24):key)).toThrow();expect(clicked).not.toHaveBeenCalled();document.body.onclick=null;
+});
+
+it('scrolls only the original search feed by a bounded step and can return to its top',()=>{
+ document.body.innerHTML='<div id="feed" style="overflow-y:auto;height:200px"><section class="note-item"><a href="/explore/'+'a'.repeat(24)+'">card</a></section></div>';
+ const feed=document.querySelector<HTMLElement>('#feed')!;
+ Object.defineProperty(feed,'scrollHeight',{configurable:true,value:1200});
+ Object.defineProperty(feed,'clientHeight',{configurable:true,value:200});
+ expect(scrollSearchResults(document,source,'down')).toMatchObject({scrollable:true,moved:true,scrollTop:66,maxTop:1000});
+ feed.scrollTop=700;
+ expect(scrollSearchResults(document,source,'top')).toMatchObject({scrollable:true,moved:true,atTop:true,scrollTop:0});
+});
+it('never scrolls a changed search context or a note overlay',()=>{
+ expect(()=>scrollSearchResults(document,source+'x','down')).toThrow();
+ document.body.insertAdjacentHTML('beforeend','<div id="noteContainer"></div>');
+ expect(()=>scrollSearchResults(document,source,'down')).toThrow();
 });

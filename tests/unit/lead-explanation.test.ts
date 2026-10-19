@@ -35,3 +35,12 @@ it('回复Lead展示来源、父评论和用户回复，结构缺失时明确提
  expect(document.body.textContent).toContain('来源类型：回复');expect(document.body.textContent).toContain('父评论：');expect(document.body.textContent).toContain(parentComment.text);expect(document.body.textContent).toContain('用户回复：');expect(document.querySelector('script')).toBeNull();
  document.body.innerHTML=renderToStaticMarkup(createElement(LeadExplanation,{decision,comment}));expect(document.body.textContent).toContain('父评论文字未采集');
 });
+
+it('未知父关系回复不展示为一级评论，仍显示回复原文与上下文缺失',()=>{
+ const comment={isReply:true,parentKey:null,text:'公司商用怎么收费？'} as import('../../src/domain/schemas').Comment;
+ document.body.innerHTML=renderToStaticMarkup(createElement(LeadExplanation,{decision,comment}));
+ expect(document.body.textContent).toContain('来源类型：回复');
+ expect(document.body.textContent).toContain('上下文未知');
+ expect(document.body.textContent).toContain(comment.text);
+ expect(document.body.textContent).not.toContain('一级评论');
+});

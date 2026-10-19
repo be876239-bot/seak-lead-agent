@@ -1,6 +1,9 @@
 import { browser } from 'wxt/browser';
 import { AppError } from '../domain/errors';
 import { LIMITS } from '../domain/limits';
+import {CaptureBudgetClock} from './capture-budget';
+import type {CaptureBudget} from '../domain/schemas';
+class CaptureBudgetStop extends Error {constructor(readonly reason:'time_limit'|'round_limit'){super(reason);}}
 import type { CaptureProgress, Comment, Note } from '../domain/schemas';
 import {
   buildRequest, ResponseSchema, SnapshotPayload, XhsStatusPayload, type Request,
@@ -15,9 +18,23 @@ export type CapturedNote = {
   hasMoreLoaded: boolean;
   stopReason?: CaptureProgress['stopReason'];
   displayedCommentCount?: number | null;
+  replyLoadWarningCount?:number;
 };
 
-export async function ask(tabId: number, req: Request, signal?: AbortSignal): Promise<unknown> {
+/** Shared guard: never send a known-truncated capture to AI or mark it complete. */
+export function captureIncompleteReason(snap:Pick<CapturedNote,'comments'|'truncated'|'stopReason'|'displayedCommentCount'|'replyLoadWarningCount'>):string|null {
+  const reasons:string[]=[];
+  if(snap.replyLoadWarningCount)reasons.push(`有${snap.replyLoadWarningCount}组回复展开后未确认加载结果`);
+  if(snap.truncated||snap.stopReason==='limit')reasons.push(`已达到${LIMITS.maxSessionComments}条单帖安全上限`);
+  if(snap.stopReason==='time_limit'||snap.stopReason==='round_limit')
+    reasons.push(`评论采集达到本帖累计${snap.stopReason==='time_limit'?'时间':'轮数'}预算`);
+  if(snap.displayedCommentCount!==undefined&&snap.displayedCommentCount!==null&&snap.comments.length<snap.displayedCommentCount)
+    reasons.push(`页面显示约${snap.displayedCommentCount}条评论，当前采集到${snap.comments.length}条`);
+  if(!reasons.length)return null;
+  return `${reasons.join('；')}。已保存评论保留，跳过 AI 分析以避免对不完整数据消耗额度。页面统计口径可能包含折叠或不可见内容。`;
+}
+
+export async function ask(tabId: number, req: Request, signal?: AbortSignal, timeoutMs:number=LIMITS.captureMessageTimeoutMs): Promise<unknown> {
   let raw: unknown;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let abort: (() => void) | undefined;
@@ -26,7 +43,7 @@ export async function ask(tabId: number, req: Request, signal?: AbortSignal): Pr
       abort = () => reject(new AppError('CANCELLED', '评论采集已取消'));
       if (signal?.aborted) { abort(); return; }
       signal?.addEventListener('abort', abort, { once: true });
-      timer = setTimeout(() => reject(new AppError('PARSE_FAILED', '页面采集请求超时；已停止，已保存评论保留', true)), LIMITS.captureMessageTimeoutMs);
+      timer = setTimeout(() => reject(new AppError('PARSE_FAILED', '页面采集请求超时；已停止，已保存评论保留', true)), Math.max(1,Math.min(LIMITS.captureMessageTimeoutMs,timeoutMs)));
       Promise.resolve(browser.tabs.sendMessage(tabId, req)).then(resolve, reject);
     });
   } catch (err) {
@@ -54,6 +71,11 @@ export type CaptureOptions = {
   autoLoad?: boolean;
   initialComments?: Comment[];
   signal?: AbortSignal;
+  initialBudget?: CaptureBudget;
+  initialReplyLoadWarnings?:string[];
+  onReplyLoadWarnings?:(parents:string[])=>Promise<void>;
+  onBudget?: (budget:CaptureBudget)=>Promise<void>;
+  now?:()=>number;
   onDelta?: (note: Note, comments: Comment[]) => Promise<void>;
   onProgress?: (progress: CaptureProgress) => Promise<void> | void;
   /** 测试可注入等待；生产默认可取消的500ms采样。 */
@@ -77,11 +99,13 @@ function waitForLoad(ms: number, signal?: AbortSignal): Promise<void> {
 export async function captureNote(tabId: number, options: CaptureOptions = {}): Promise<CapturedNote> {
   const { signal } = options;
   checkCancelled(signal);
-  const status = await getNoteStatus(tabId);
+  const status = await getNoteStatus(tabId,signal);
+  checkCancelled(signal);
   checkCancelled(signal);
   if (status.blocked) throw new AppError('PAGE_BLOCKED', '平台限制：登录或风控遮挡，请手动处理后重试');
   if (!status.supported || !status.noteKey) throw new AppError('PAGE_UNSUPPORTED', '当前标签页不是受支持的小红书笔记页');
   const expectedNoteKey = status.noteKey;
+  const budget=new CaptureBudgetClock(expectedNoteKey,options.initialBudget,options.now);
   const initial=options.initialComments??[];
   if(initial.some(c=>c.noteKey!==expectedNoteKey))throw new AppError('PAGE_CHANGED','本地评论与当前笔记不匹配');
   const found = new Map<string, Comment>(initial.slice(0,LIMITS.maxSessionComments).map(c=>[c.commentKey,c]));
@@ -91,20 +115,25 @@ export async function captureNote(tabId: number, options: CaptureOptions = {}): 
     if (first && !stopPromise) stopPromise = ask(tabId, buildRequest('XHS_STOP_SESSION', { sessionId: first.sessionId })).catch(() => {});
     return stopPromise;
   };
-  const abort = () => { void stop(); };
+  const abort = () => { budget.freeze();void stop(); };
   let note: Note | null = null;
   let truncated = false;
   let hasMoreLoaded = false;
   let endOfList = false;
   let addedCount = 0;
   let loadingReplies=false;
+  const replyLoadWarnings=new Set(options.initialReplyLoadWarnings??[]);
   let activityVersion=0,atBottom=true,loadingComments=false;
-  let displayedCommentCount:number|null=null;
+  let displayedCommentCount:number|null=options.initialBudget?.displayedCommentCount??null;
   const report = async (loading: boolean, stopReason: CaptureProgress['stopReason'] = null) => {
-    const replyCount=[...found.values()].filter(c=>c.parentKey!==null).length;
+    budget.update(found.size,displayedCommentCount);
+    const budgetState=budget.snapshot();
+    await options.onBudget?.(budgetState);
+    await options.onReplyLoadWarnings?.([...replyLoadWarnings]);
+    const replyCount=[...found.values()].filter(c=>c.isReply===true || c.parentKey!==null).length;
     const topLevelCount=found.size-replyCount;
     const countStatus=displayedCommentCount===null?'unknown':found.size<displayedCommentCount?'below_displayed_total':'meets_or_exceeds_displayed_total';
-    await options.onProgress?.({ discoveredCount: found.size, addedCount, loading, stopReason,replyCount,topLevelCount,loadingReplies:loading&&loadingReplies,displayedCommentCount,countStatus });
+    await options.onProgress?.({ replyLoadWarningCount:replyLoadWarnings.size,budget:budgetState,discoveredCount: found.size, addedCount, loading, stopReason,replyCount,topLevelCount,unresolvedReplyCount:[...found.values()].filter(c=>c.isReply===true && !c.parentKey).length,loadingReplies:loading&&loadingReplies,displayedCommentCount,countStatus });
   };
   const accept = async (page: SnapshotPayload) => {
     checkCancelled(signal);
@@ -112,13 +141,19 @@ export async function captureNote(tabId: number, options: CaptureOptions = {}): 
       throw new AppError('PAGE_CHANGED', '快照所属笔记或会话改变，已停止采集');
     }
     loadingReplies=page.loadingReplies===true;
+    for(const parent of page.replyLoadWarnings??[])replyLoadWarnings.add(parent);
     activityVersion=page.activityVersion??activityVersion;
     atBottom=page.atBottom??true;
     loadingComments=page.loadingComments===true;
     if(page.displayedCommentCount!==undefined && page.displayedCommentCount!==null) displayedCommentCount=page.displayedCommentCount;
     note ??= page.note;
     if (!note) throw new AppError('PARSE_FAILED', '未能解析笔记内容');
-    const delta = page.comments.filter((c) => !found.has(c.commentKey)).slice(0,LIMITS.maxSessionComments-found.size);
+    const fresh = page.comments.filter(c=>!found.has(c.commentKey)).slice(0,LIMITS.maxSessionComments-found.size);
+    const updates = page.comments.filter(c=>{
+      const previous=found.get(c.commentKey);
+      return previous && !previous.parentKey && !!c.parentKey;
+    });
+    const delta = [...fresh,...updates];
     if (delta.some((c) => c.noteKey !== expectedNoteKey)) throw new AppError('PAGE_CHANGED', '快照混入其他笔记评论');
     if ((delta.length || found.size === 0) && options.onDelta) {
       try { await options.onDelta(note, delta); }
@@ -126,23 +161,26 @@ export async function captureNote(tabId: number, options: CaptureOptions = {}): 
     }
     checkCancelled(signal);
     for (const comment of delta) {
-      if (found.size >= LIMITS.maxSessionComments) { truncated = true; break; }
+      if (!found.has(comment.commentKey) && found.size >= LIMITS.maxSessionComments) { truncated = true; continue; }
       found.set(comment.commentKey, comment);
     }
-    addedCount += delta.length;
+    addedCount += fresh.length;
     truncated ||= page.truncated || found.size >= LIMITS.maxSessionComments;
     hasMoreLoaded ||= page.hasMoreLoaded;
     endOfList ||= page.endOfList === true;
+    budget.update(found.size,displayedCommentCount);
   };
   const snapshot = async (cursor: string | null, advance = false) => {
     for(let sample=0;;sample++) {
       checkCancelled(signal);
+      if(budget.stopReason()==='time_limit')throw new CaptureBudgetStop('time_limit');
       try {
         return SnapshotPayload.parse(await ask(tabId, buildRequest('XHS_GET_SNAPSHOT', {
           sessionId: first!.sessionId, expectedNoteKey, cursor, ...(advance ? { advance: true } : {}),
-        }), signal));
+        }), signal,budget.snapshot().durationMs-budget.snapshot().elapsedMs));
       }catch(err) {
-        // Only these two known adapter errors can mean a temporary DOM rebuild.
+        if(err instanceof AppError && err.code==='PARSE_FAILED' && err.message.startsWith('页面采集请求超时') && budget.stopReason()==='time_limit')throw new CaptureBudgetStop('time_limit');
+        // Only the two known missing-container errors can mean a temporary DOM rebuild.
         // Every retry still validates the same session/note and platform guards.
         if(!options.autoLoad || !(err instanceof AppError) || err.code!=='PARSE_FAILED' ||
           !['未找到评论列表容器','未找到评论容器，页面可能未加载完成或结构已变化'].includes(err.message))throw err;
@@ -167,27 +205,31 @@ export async function captureNote(tabId: number, options: CaptureOptions = {}): 
     }
   };
   try {
-    first = SnapshotPayload.parse(await ask(tabId, buildRequest('XHS_START_SESSION', { expectedNoteKey })));
     signal?.addEventListener('abort', abort, { once: true });
+    checkCancelled(signal);
+    await options.onBudget?.(budget.snapshot());
+    first = SnapshotPayload.parse(await ask(tabId, buildRequest('XHS_START_SESSION', { expectedNoteKey,replyLoadWarnings:[...replyLoadWarnings] }),signal));
     await drain(first);
     await report(false);
     let stopReason: CaptureProgress['stopReason'] = null;
-    const startedAt = Date.now();
     let idleRounds = 0;
     let quietMs=0;
     if (options.autoLoad) {
-      for (let round = 0; round < LIMITS.captureMaxRounds; round++) {
+      for (;;) {
         checkCancelled(signal);
         if (truncated) { stopReason = 'limit'; break; }
         if (endOfList) { stopReason = 'no_more'; break; }
-        if (Date.now() - startedAt >= LIMITS.captureMaxDurationMs) { stopReason = 'time_limit'; break; }
+        budget.update(found.size,displayedCommentCount);
+        const exhausted=budget.stopReason();
+        if(exhausted){stopReason=exhausted;break;}
+        budget.consumeRound();
         const before = found.size;
         const activityBefore=activityVersion;
         addedCount = 0;
         await report(true);
         await drain(await snapshot(null, true));
         for (let sample = 0; sample < LIMITS.captureSamplesPerRound && !truncated && !endOfList; sample++) {
-          await (options.wait ?? waitForLoad)(LIMITS.capturePollMs, signal);
+          await (options.wait ?? waitForLoad)(Math.min(LIMITS.capturePollMs,Math.max(0,budget.snapshot().durationMs-budget.snapshot().elapsedMs)), signal);
           checkCancelled(signal);
           const countBefore=found.size,versionBefore=activityVersion;
           await drain(await snapshot(null));
@@ -199,18 +241,22 @@ export async function captureNote(tabId: number, options: CaptureOptions = {}): 
         if (truncated) { stopReason = 'limit'; break; }
         if (endOfList) { stopReason = 'no_more'; break; }
         if (idleRounds >= LIMITS.captureIdleRounds && atBottom && quietMs>=LIMITS.captureQuietMs) { stopReason = 'no_new'; break; }
-        if (round === LIMITS.captureMaxRounds - 1) stopReason = 'round_limit';
       }
     }
     checkCancelled(signal);
     await report(false, stopReason);
-    return { noteKey: expectedNoteKey, parserVersion: status.parserVersion, note: note!, comments: [...found.values()], truncated, hasMoreLoaded, stopReason, displayedCommentCount };
+    return { noteKey: expectedNoteKey, parserVersion: status.parserVersion, note: note!, comments: [...found.values()], truncated, hasMoreLoaded, stopReason, displayedCommentCount,replyLoadWarningCount:replyLoadWarnings.size };
   } catch (err) {
+    if(err instanceof CaptureBudgetStop && !signal?.aborted){
+      await report(false,err.reason);
+      return {noteKey:expectedNoteKey,parserVersion:status.parserVersion,note:note!,comments:[...found.values()],truncated,hasMoreLoaded,stopReason:err.reason,displayedCommentCount,replyLoadWarningCount:replyLoadWarnings.size};
+    }
     await report(false, signal?.aborted ? 'cancelled' : 'error').catch(() => {});
     if (signal?.aborted) throw new AppError('CANCELLED', '评论采集已取消');
     throw err;
   } finally {
-    signal?.removeEventListener('abort', abort);
-    await stop();
+    budget.freeze();
+    try{await options.onBudget?.(budget.snapshot());}
+    finally{signal?.removeEventListener('abort', abort);await stop();}
   }
 }

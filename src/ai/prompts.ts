@@ -84,12 +84,13 @@ export function buildCommentMessages(input: ClassificationInput): ChatMessage[] 
       items: input.items.map((item) => ({
         commentId: item.commentId, sourceId: item.sourceId, text: item.text,
         parent: item.parent ? { sourceId: item.parent.sourceId, text: item.parent.text } : null,
+        ...(item.replyContext ? {replyContext:item.replyContext, contextNotice:'这是回复，父评论上下文未知；仅根据当前回复判断，不得猜测父评论。'} : {}),
       })),
     }, (_key, value: unknown) => typeof value === 'string' ? redactText(value) : value) },
   ];
 }
 
-/** 格式修复：回传坏输出与错误摘要，仅要求改格式，不追加新数据；仍受预算与取消控制。 */
+/** 校验失败修复：原始输入仍是唯一事实来源；特别约束证据引文必须可逐字核验。 */
 export function appendRepair(
   original: ChatMessage[],
   errorSummary: string,
@@ -97,8 +98,18 @@ export function appendRepair(
 ): ChatMessage[] {
   return [
     ...original,
+    // 模型上一次的结果只作为待修正草稿，不是事实来源，也不覆盖原始来源文本。
     { role: 'assistant', content: redactText(badOutput).slice(0, 8000) },
-    { role: 'user', content: `上一次的输出不符合要求：${redactText(errorSummary)}
-请仅修正输出格式后重新返回完整 JSON，仍然只返回 JSON。` },
+    { role: 'user', content: `上一次的输出未通过校验：${redactText(errorSummary)}
+请依据前面原始输入中的 JSON 数据修正，并返回完整 JSON。原始输入是唯一事实来源；上一次输出只是待修正草稿。
+
+证据引文必须严格遵守以下规则：
+1. 每个 evidence.quote 都必须从该 sourceId 对应的原文中逐字复制，不能改写、概括、翻译、拼接不同来源或补写原文没有的词句。
+2. 可以用“…”省略中间内容，但省略号前后的每一段都必须在同一来源原文中按顺序连续命中；最稳妥的方式是直接复制一段较短的原文。
+3. sourceId 必须是该条结果允许使用的来源。不要把笔记或父评论中的话伪装成当前评论者说的。
+4. 如果某条引文无法确认与来源原文完全一致，就删除这条 evidence，不要猜测或伪造。若评论分类结果没有剩余的可验证引文，应将相关判断保守地降为 unknown，并在 reason/uncertainty 中说明证据不足；不得在没有可验证证据时保留确定性的购买意向或高意向判断。产品画像中若 observed 事实无法提供真实引文，应改为有依据的 inferred，无法判断则改为 unknown 且 value 为 null。
+5. 保持每个请求 ID 恰好一次、保留原有 JSON schema 和枚举值，不添加未请求的条目，不输出 Markdown 或解释文字。
+
+请先修正引文和 sourceId，再检查整体 JSON；最终只返回完整 JSON。` },
   ];
 }

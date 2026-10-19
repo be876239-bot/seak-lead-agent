@@ -1,12 +1,12 @@
 import { z } from 'zod';
 import { ERROR_CODES, type ErrorCode } from '../domain/errors';
-import { BatchSchema, CommentSchema, JobSchema, NoteSchema, ProductSourceBlockSchema } from '../domain/schemas';
+import { ReplyLoadWarningsSchema, BatchSchema, CommentSchema, JobSchema, NoteSchema, ProductSourceBlockSchema } from '../domain/schemas';
 import { LIMITS } from '../domain/limits';
 
 export const PROTOCOL_VERSION = 1;
 
 export const MessageType = z.enum([
-  'XHS_CLICK_NOTE', 'XHS_CLOSE_NOTE', 'XHS_SEARCH_STATE',
+  'XHS_CLICK_NOTE', 'XHS_CLOSE_NOTE', 'XHS_SEARCH_STATE', 'XHS_SCROLL_SEARCH',
   'XHS_DISCOVER', 'XHS_GUARD', 'DISCOVERY_START', 'DISCOVERY_CONTROL',
   'XHS_GET_STATUS',
   'XHS_START_SESSION',
@@ -28,14 +28,15 @@ export const RequestSchema = z.discriminatedUnion('type', [
   z.object({protocol:z.literal(PROTOCOL_VERSION),requestId:RequestId,type:z.literal('XHS_CLOSE_NOTE'),payload:z.object({expectedNoteKey:z.string().regex(/^xhs:[0-9a-z]{24}$/)})}),
   z.object({protocol:z.literal(PROTOCOL_VERSION),requestId:RequestId,type:z.literal('XHS_SEARCH_STATE'),payload:z.object({})}),
   z.object({protocol:z.literal(PROTOCOL_VERSION),requestId:RequestId,type:z.literal('XHS_CLICK_NOTE'),payload:z.object({expectedSearchUrl:z.string().url().max(LIMITS.maxUrlChars),expectedNoteKey:z.string().regex(/^xhs:[0-9a-z]{24}$/)})}),
-  z.object({ protocol:z.literal(PROTOCOL_VERSION), requestId:RequestId, type:z.literal('XHS_DISCOVER'), payload:z.object({}) }),
+  z.object({protocol:z.literal(PROTOCOL_VERSION),requestId:RequestId,type:z.literal('XHS_SCROLL_SEARCH'),payload:z.object({expectedSearchUrl:z.string().url().max(LIMITS.maxUrlChars),direction:z.enum(['down','top'])})}),
+  z.object({ protocol:z.literal(PROTOCOL_VERSION), requestId:RequestId, type:z.literal('XHS_DISCOVER'), payload:z.object({maxPosts:z.number().int().min(1).max(100).default(5)}) }),
   z.object({ protocol:z.literal(PROTOCOL_VERSION), requestId:RequestId, type:z.literal('XHS_GUARD'), payload:z.object({}) }),
-  z.object({protocol:z.literal(PROTOCOL_VERSION),requestId:RequestId,type:z.literal('DISCOVERY_START'),payload:z.object({jobId:z.string().uuid(),productId:z.string().uuid(),tabId:z.number().int().nonnegative(),direction:z.string().min(1).max(200)})}),
+  z.object({protocol:z.literal(PROTOCOL_VERSION),requestId:RequestId,type:z.literal('DISCOVERY_START'),payload:z.object({jobId:z.string().uuid(),productId:z.string().uuid(),tabId:z.number().int().nonnegative(),direction:z.string().min(1).max(200),maxPosts:z.number().int().min(1).max(100).default(20)})}),
   z.object({protocol:z.literal(PROTOCOL_VERSION),requestId:RequestId,type:z.literal('DISCOVERY_CONTROL'),payload:z.object({jobId:z.string().uuid(),action:z.enum(['pause','stop','continue'])})}),
   z.object({ protocol: z.literal(PROTOCOL_VERSION), requestId: RequestId, type: z.literal('XHS_GET_STATUS'), payload: z.object({}) }),
   z.object({
     protocol: z.literal(PROTOCOL_VERSION), requestId: RequestId, type: z.literal('XHS_START_SESSION'),
-    payload: z.object({ expectedNoteKey: z.string().min(1).max(256) }),
+    payload: z.object({ expectedNoteKey: z.string().min(1).max(256),replyLoadWarnings:ReplyLoadWarningsSchema.optional() }),
   }),
   z.object({
     protocol: z.literal(PROTOCOL_VERSION), requestId: RequestId, type: z.literal('XHS_GET_SNAPSHOT'),
@@ -99,6 +100,7 @@ export const SnapshotPayload = z.object({
   nextCursor: z.string().max(256).nullable(),
   endOfList: z.boolean().optional(),
   loadingReplies: z.boolean().optional(),
+  replyLoadWarnings:ReplyLoadWarningsSchema.optional(),
   activityVersion:z.number().int().nonnegative().optional(),
   atBottom:z.boolean().optional(),
   loadingComments:z.boolean().optional(),

@@ -1,6 +1,7 @@
 import{afterEach,beforeEach,expect,it,vi}from'vitest';
 import{buildError,buildOk}from'../../src/messaging/protocol';
 import{AppError,toErrorPayload}from'../../src/domain/errors';
+import{MISSING_SEARCH_CARD_MESSAGE}from'../../src/xhs/navigation';
 import type{DiscoveryNavigation}from'../../src/domain/schemas';
 const api=vi.hoisted(()=>({get:vi.fn(),create:vi.fn(),update:vi.fn(),goBack:vi.fn(),sendMessage:vi.fn()}));
 vi.mock('wxt/browser',()=>({browser:{tabs:api}}));
@@ -72,4 +73,39 @@ it('resume a returning checkpoint waits for original search DOM without another 
  api.sendMessage.mockImplementation(async(id,req)=>req.type==='XHS_SEARCH_STATE'&&transient?buildOk(req.requestId,{sourceUrl:source,isSearch:false,hasNote:true}):original(id,req));
  const pending=expect(p.reconcile()).resolves.toBeUndefined();await vi.advanceTimersByTimeAsync(500);transient=false;await vi.advanceTimersByTimeAsync(1000);await pending;
  expect(p.navigation.phase).toBe('search');expect(api.goBack).not.toHaveBeenCalled();
+});
+
+it('recovers a queued note missing from the virtualized search DOM by scrolling normally, then clicking its real card',async()=>{
+ const original=api.sendMessage.getMockImplementation()!;let clickAttempts=0;let scrolls=0;
+ api.sendMessage.mockImplementation(async(id,req)=>{
+  if(req.type==='XHS_CLICK_NOTE'){
+   clickAttempts++;
+    if(clickAttempts===1)return buildError(req.requestId,toErrorPayload(new AppError('PAGE_CHANGED',MISSING_SEARCH_CARD_MESSAGE)));
+   current=url;return buildOk(req.requestId,{clicked:true,noteKey:'xhs:'+'a'.repeat(24)});
+  }
+  if(req.type==='XHS_SCROLL_SEARCH'){scrolls++;return buildOk(req.requestId,{scrollable:true,moved:true,atTop:false,atBottom:false,scrollTop:scrolls*240,maxTop:3000});}
+  return original(id,req);
+ });
+ const p=page(),signal=new AbortController().signal;const pending=p.navigate(url,signal);await vi.runAllTimersAsync();await pending;
+ expect(clickAttempts).toBe(2);expect(scrolls).toBe(1);expect(current).toBe(url);
+});
+it('pause during recovery scrolling cancels before any second click',async()=>{
+ const ac=new AbortController(),original=api.sendMessage.getMockImplementation()!;let clickAttempts=0;
+ api.sendMessage.mockImplementation(async(id,req)=>{
+   if(req.type==='XHS_CLICK_NOTE'){clickAttempts++;return buildError(req.requestId,toErrorPayload(new AppError('PAGE_CHANGED',MISSING_SEARCH_CARD_MESSAGE)));}
+  if(req.type==='XHS_SCROLL_SEARCH'){ac.abort();return buildOk(req.requestId,{scrollable:true,moved:true,atTop:false,atBottom:false,scrollTop:240,maxTop:3000});}
+  return original(id,req);
+ });
+ await expect(page().navigate(url,ac.signal)).rejects.toMatchObject({code:'CANCELLED'});
+ expect(clickAttempts).toBe(1);
+});
+it('keeps the task paused if bounded search scrolling still cannot find the queued note',async()=>{
+ const original=api.sendMessage.getMockImplementation()!;
+ api.sendMessage.mockImplementation(async(id,req)=>{
+   if(req.type==='XHS_CLICK_NOTE')return buildError(req.requestId,toErrorPayload(new AppError('PAGE_CHANGED',MISSING_SEARCH_CARD_MESSAGE)));
+  if(req.type==='XHS_SCROLL_SEARCH')return buildOk(req.requestId,{scrollable:true,moved:false,atTop:true,atBottom:true,scrollTop:0,maxTop:0});
+  return original(id,req);
+ });
+ const p=page(),signal=new AbortController().signal;const pending=p.navigate(url,signal);const rejected=expect(pending).rejects.toMatchObject({code:'PAGE_CHANGED'});await vi.runAllTimersAsync();await rejected;
+ expect(clicks()).toHaveLength(2);expect(api.goBack).not.toHaveBeenCalled();
 });

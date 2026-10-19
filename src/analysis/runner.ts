@@ -83,7 +83,7 @@ function buildCandidates(
     const ch = contextHash({
       productContext,
       noteContext,
-      parentContext: c.parentKey ? parentLookup.get(c.parentKey)?.text ?? '' : '',
+      parentContext: c.parentKey ? parentLookup.get(c.parentKey)?.text ?? 'reply:parent_unavailable' : c.isReply ? 'reply:parent_unavailable' : '',
     });
     return {
       comment: c,
@@ -152,6 +152,13 @@ async function classifyWithRepair(
         inputTokens: null, outputTokens: null, durationMs: Date.now() - t0,
       }));
       if (e.code === 'CANCELLED') throw e;
+      // Provider 的 JSON 解析失败发生在 schema 校验之前，也必须共享同一次修复预算。
+      if (e.code === 'AI_INVALID_OUTPUT' && !repair && !handle.signal.aborted) {
+        attemptIndex += 1;
+        repair = { errorSummary: safeErrSummary(e), badOutput: '' };
+        log?.(`批次输出解析未通过（${safeErrSummary(e)}），发起修复重发（最多 1 次）…`);
+        continue;
+      }
       if (e.retryable && !retryableRetried && !handle.signal.aborted) {
         retryableRetried = true;
         attemptIndex += 1;
@@ -174,7 +181,8 @@ async function classifyWithRepair(
       }));
       if (e.code !== 'AI_INVALID_OUTPUT' || repair) throw e;
       log?.(`批次输出校验未通过（${safeErrSummary(e)}），发起修复重发（最多 1 次）…`);
-      repair = { errorSummary: e.message, badOutput: safeJson(resp.value) };
+      // 只传安全的错误类别摘要，避免将模型生成的引文文本拼进修复指令。
+      repair = { errorSummary: safeErrSummary(e), badOutput: safeJson(resp.value) };
     }
   }
 }
@@ -263,7 +271,9 @@ async function executeRows(
           profileVersion: ctx.product.profileVersion,
           commentKey,
           contextHash: cand?.contextHash ?? `ctx:${hash64(commentKey)}`,
-          decision: v.decision,
+          decision: input.items.find(item=>item.commentId===v.decision.commentId)?.replyContext==='parent_unavailable'
+            ? {...v.decision, uncertainty: `回复缺少父评论上下文，仅依据当前回复判断。${v.decision.uncertainty ?? ''}`.slice(0,500)}
+            : v.decision,
           group: groupDecision(v.decision, v.hasSelfEvidence),
           modelId: resp.model,
           promptVersion: COMMENT_PROMPT_VERSION,
@@ -530,7 +540,8 @@ export async function runProfileGeneration(
         }));
         if (e.code !== 'AI_INVALID_OUTPUT' || repair) throw e;
         spec.log?.(`画像输出校验未通过（${safeErrSummary(e)}），发起修复重发（最多 1 次）…`);
-        repair = { errorSummary: e.message, badOutput: safeJson(resp.value) };
+        // 只传安全摘要，避免将模型生成的引文/文本拼进修复指令。
+        repair = { errorSummary: safeErrSummary(e), badOutput: safeJson(resp.value) };
       }
     }
     await deps.repos.addUsage(mk({

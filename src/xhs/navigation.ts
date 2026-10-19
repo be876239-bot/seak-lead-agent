@@ -21,6 +21,38 @@ export function closeNote(doc:Document,expectedNoteKey:string) {
   if(!(control instanceof doc.defaultView!.HTMLElement) || control.closest('form,.interactions,.engage-bar') || control.hasAttribute('disabled') || control.getAttribute('aria-disabled')==='true')throw new AppError('PAGE_UNSUPPORTED','当前笔记没有可确认的关闭入口；请手动返回原搜索页后继续');
   control.click();return {clicked:true,noteKey:expectedNoteKey};
 }
+/** 在搜索结果原生滚动容器中前进一小步，触发正常的懒加载/虚拟列表更新。 */
+export function scrollSearchResults(doc:Document,expectedSearchUrl:string,direction:'down'|'top') {
+  const state=searchState(doc);
+  if(!sameSearch(state.sourceUrl,expectedSearchUrl)||state.hasNote||!state.isSearch)
+    throw new AppError('PAGE_CHANGED','当前页面不是原搜索结果，不能自动查找队列中的笔记');
+
+  const canScroll=(el:HTMLElement)=>{
+    const overflow=doc.defaultView?.getComputedStyle(el).overflowY??'';
+    return /^(auto|scroll|overlay)$/.test(overflow)&&el.scrollHeight>el.clientHeight+8;
+  };
+  let container:HTMLElement|null=null;
+  const card=doc.querySelector('section.note-item');
+  for(let node=card?.parentElement??null;node&&node!==doc.body&&node!==doc.documentElement;node=node.parentElement) {
+    if(node instanceof (doc.defaultView?.HTMLElement??HTMLElement)&&canScroll(node)){container=node;break;}
+  }
+  if(!container) {
+    const root=doc.scrollingElement;
+    if(root&&root.scrollHeight>root.clientHeight+8)container=root as HTMLElement;
+  }
+  if(!container&&doc.body&&canScroll(doc.body))container=doc.body;
+  if(!container)return {scrollable:false,moved:false,atTop:true,atBottom:true,scrollTop:0,maxTop:0};
+
+  const before=container.scrollTop;
+  const maxTop=Math.max(0,container.scrollHeight-container.clientHeight);
+  if(direction==='top')container.scrollTop=0;
+  else container.scrollTop=Math.min(maxTop,before+Math.max(1,Math.floor(Math.max(1,container.clientHeight)/3)));
+  const after=container.scrollTop;
+  return {scrollable:true,moved:after!==before,atTop:after<=1,atBottom:after>=maxTop-4,scrollTop:after,maxTop};
+}
+
+export const MISSING_SEARCH_CARD_MESSAGE='候选帖子当前不在已加载搜索DOM中；队列保留，请正常加载原结果后继续';
+
 /** 重新定位当前真实卡片。不改href/target，不写history/location，不构造导航URL。 */
 export function clickSearchNote(doc:Document,expectedSearchUrl:string,expectedNoteKey:string) {
   const state=searchState(doc);
@@ -30,7 +62,7 @@ export function clickSearchNote(doc:Document,expectedSearchUrl:string,expectedNo
     return href && noteKeyFromUrl(href)===expectedNoteKey && visible(a) && !a.closest('.interactions,form');
   });
   const anchor=candidates.find(a=>a.classList.contains('cover'))??candidates[0];
-  if(!anchor)throw new AppError('PAGE_CHANGED','候选帖子当前不在已加载搜索DOM中；队列保留，请正常加载原结果后继续');
+  if(!anchor)throw new AppError('PAGE_CHANGED',MISSING_SEARCH_CARD_MESSAGE);
   const target=anchor.getAttribute('target')??doc.querySelector('base[target]')?.getAttribute('target')??'';
   if((target && target!=='_self') || anchor.hasAttribute('download'))throw new AppError('PAGE_UNSUPPORTED','帖子入口要求其他窗口或下载，已暂停；不会改写链接或强制跳URL');
   anchor.scrollIntoView?.({block:'center',behavior:'instant'});

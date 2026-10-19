@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { browser } from 'wxt/browser';
 import type { Job, Product } from '../../src/domain/schemas';
+import { LIMITS } from '../../src/domain/limits';
 import { sendRequest } from '../../src/messaging/client';
 import { toErrorPayload } from '../../src/domain/errors';
 import { getNoteStatus } from '../../src/xhs/capture';
@@ -16,6 +17,7 @@ import { emitLocalJobLog } from '../../src/ui/joblog';
 import JobLogPanel from './JobLog';
 import LeadExplanation from '../../src/ui/LeadExplanation';
 import CollectionProgressView from '../../src/ui/CollectionProgress';
+import ErrorNotice from '../../src/ui/ErrorNotice';
 
 const JOB_KEY = 'note.lastJobId';
 
@@ -30,12 +32,12 @@ function ItemCard({ view, product, onToggleHandled }: {
   const stale = view.analysis.profileVersion !== product.profileVersion;
   const badge = needsTargetBadge(view.analysis.decision);
   return (
-    <div style={{ border: '1px solid #eee', borderRadius: 6, padding: 6, fontSize: 12 }}>
+    <div className="sl-card" style={{ fontSize: 12 }}>
       <div style={{ color: '#666' }}>
         {view.comment.authorDisplayName ?? '（页面无昵称）'}
         {view.comment.locationText ? ` · ${view.comment.locationText}` : ''}
       </div>
-      {!view.comment.parentKey && <div style={{ color: '#444' }}>{view.comment.text}</div>}
+      {!view.comment.parentKey && !view.comment.isReply && <div style={{ color: '#444' }}>{view.comment.text}</div>}
       <div style={{ marginTop: 4 }}>
         <b>{view.analysis.decision.needSummary}</b>
         <span style={{ color: '#777', marginLeft: 6 }}>意向：{intentShortCn(view.analysis.decision)}</span>
@@ -120,7 +122,7 @@ export default function CurrentNote() {
   }, [refreshTab, loadResults]);
 
   const fullRetry = async () => {
-    if (!window.confirm('完整重试：重新从当前笔记滚动采集评论（最多500条）并创建新任务。已分析成功的命中缓存、不重复计费；失败或未分析过的会提交模型。继续？')) return;
+    if (!window.confirm(`完整重试：重新从当前笔记滚动采集评论（最多${LIMITS.maxSessionComments}条）并创建新任务。已分析成功的命中缓存、不重复计费；失败或未分析过的会提交模型。继续？`)) return;
     await analyze();
   };
 
@@ -200,8 +202,9 @@ export default function CurrentNote() {
   const analyzeLabel = job?.noteKey && groups ? '继续采集评论并分析新增' : '开始采集评论（完成后分析）';
 
   return (
-    <div style={{ display: 'grid', gap: 10, fontSize: 13 }}>
-      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+    <div className="sl-page" style={{ display: 'grid', gap: 10, fontSize: 13 }}>
+      <h2>当前笔记</h2>
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
         <span>当前产品：</span>
         <select value={productId ?? ''} onChange={(e) => setProductId(e.target.value || null)} disabled={busy}>
           {products.length === 0 && <option value="">（尚无产品，请先到“产品”页创建）</option>}
@@ -213,7 +216,7 @@ export default function CurrentNote() {
       </div>
 
       {!products.length && <p style={{ color: '#c00', margin: 0 }}>还没有产品：请先到“产品”页粘贴链接生成画像。</p>}
-      {statusError && <p style={{ color: '#c00', margin: 0 }}>无法读取页面状态：{statusError}。请在浏览器中打开一篇小红书笔记后点“刷新页面状态”。</p>}
+      {statusError && <ErrorNotice message={statusError} code="PAGE_UNREACHABLE" tone="error" />}
       {status?.blocked && <p style={{ color: '#b60', margin: 0 }}>页面被限流或验证码拦截：请你在页面上手动处理后重试，扩展不会自动操作页面。</p>}
       {status && !status.supported && !status.blocked && (
         <p style={{ color: '#b60', margin: 0 }}>当前标签页不是受支持的小红书笔记详情页。</p>
@@ -225,7 +228,7 @@ export default function CurrentNote() {
       )}
 
       <div style={{ display: 'flex', gap: 6 }}>
-        <button onClick={() => void analyze()} disabled={busy || !productId || !status?.supported || status.blocked}>
+        <button className="sl-button--primary" onClick={() => void analyze()} disabled={busy || !productId || !status?.supported || status.blocked}>
           {analyzeLabel}
         </button>
         {busy && <button onClick={() => void cancel()}>取消任务</button>}
@@ -234,20 +237,21 @@ export default function CurrentNote() {
       </div>
       {!busy && (
         <p style={{ color: '#888', margin: 0, fontSize: 11 }}>
-          点击后会小步滚动当前笔记，增量保存网页加载出的评论（最多500条）；多轮未新增即停止，不保证采集全部。遇平台登录/验证码限制请手动处理，不会绕过；折叠回复仍需人工展开。再次分析时已有结果走缓存。
+          点击后会小步滚动当前笔记，增量保存网页加载出的评论（单帖最多{LIMITS.maxSessionComments}条）；多轮未新增即停止，不保证采集全部。达到上限或页面显示数高于实际采集数时会标记为部分采集并跳过 AI 分析，避免误报完整或浪费额度。遇平台登录/验证码限制请手动处理，不会绕过；折叠回复仍需人工展开。再次分析时已有结果走缓存。
         </p>
       )}
       {job && (
         <p role="status" style={{ margin: 0 }}>
-          任务：{jobPhaseLabel(job)}{job.errorCode ? `（${job.errorCode}）` : ''}
+          任务：{jobPhaseLabel(job)}
           {loadedCount != null && ` · 本地累计 ${loadedCount} 条评论（非全量保证）`}
         </p>
       )}
+      {job?.errorCode && !error && <ErrorNotice message={job.errorCode} code={job.errorCode} tone="warning" />}
       {job?.collection && <CollectionProgressView progress={job.collection} />}
       {job?.totalItems === 0 && job?.status === 'completed' && loadedCount === 0 && (
         <p style={{ color: '#777', margin: 0 }}>页面没有已加载评论：请先在笔记页手动展开评论区再分析。</p>
       )}
-      {error && <p style={{ color: '#c00', margin: 0 }}>{error}</p>}
+      {error && <ErrorNotice message={error} tone="error" />}
       <JobLogPanel jobId={job?.id ?? null} />
       {job?.noteKey && groups && loadedCount !== null && loadedCount > 0 && (
         <p style={{ color: '#777', margin: 0 }}>本次需要新增 AI 分析的评论：{job.totalItems} 条（其余命中缓存，不重复计费）。</p>
@@ -267,7 +271,7 @@ export default function CurrentNote() {
         </details>
       )}
       {groups && GROUP_ORDER.map((g) => (
-        <section key={g} style={{ border: '1px solid #ddd', borderRadius: 6, padding: 8 }}>
+        <section key={g} className="sl-card sl-group-card">
           <h3 style={{ margin: '0 0 6px', fontSize: 13 }}>{GROUP_TITLES[g]}（{groups[g]?.length ?? 0}）</h3>
           {(groups[g] ?? []).length === 0
             ? <p style={{ color: '#999', margin: 0, fontSize: 12 }}>本组暂无结果。</p>

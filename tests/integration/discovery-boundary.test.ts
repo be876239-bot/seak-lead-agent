@@ -58,9 +58,12 @@ describe('post completion boundaries',()=>{
   const {deps,task}=setup({changed:async state=>{if(state.post?.stage==='completed')throw new Error('disk');}});
   await task.run();expect(task.state.status).toBe('stopped');expect(deps.navigate).toHaveBeenCalledTimes(1);
  });
- it('boundary continue keeps the original ten minute deadline',async()=>{
-  let now=0;const {deps,task}=setup({now:()=>now,process:async(_u,_s,p,checkpoint)=>{p(500,1);await checkpoint.completed();task.pause();}});
-  await task.run();now=600001;await task.run();expect(task.state.status).toBe('stopped');expect(deps.navigate).toHaveBeenCalledTimes(1);
+ it('long pause after a completed post does not block continuing to the next post',async()=>{
+  vi.useFakeTimers();try{
+   const {deps,task}=setup({postTimeoutMs:1000,process:async(_u,_s,p,checkpoint)=>{p(500,1);await checkpoint.completed();task.pause();}});
+   await task.run();expect(task.state.status).toBe('paused');await vi.advanceTimersByTimeAsync(3600000);await task.run();
+   expect(task.state.status).toBe('paused');expect(deps.navigate).toHaveBeenCalledTimes(2);
+  }finally{vi.useRealTimers();}
  });
  it('does not process B until navigation and readiness for B finish',async()=>{
   let release!:()=>void;let ready!:()=>void;
@@ -80,4 +83,60 @@ describe('post completion boundaries',()=>{
   await task.run();const restored=new SerialDiscovery(urls,{...deps,process:async(_u,_s,p)=>{p(40,6);}},JSON.parse(JSON.stringify(task.state)));
   await restored.run();expect(restored.state.comments).toBe(80);expect(restored.state.leads).toBe(12);task.stop();
  });
+});
+
+it('D021 采集预算跟随帖子检查点持久化，恢复及迟到回调不能重置',async()=>{
+ const {CaptureBudgetClock}=await import('../../src/xhs/capture-budget');
+ let now=0;let oldBudget:((b:import('../../src/domain/schemas').CaptureBudget)=>Promise<void>)|undefined;
+ let runs=0;
+ const {deps,task}=setup({now:()=>now,process:async(_u,_s,_p,cp)=>{
+   if(++runs===1){const clock=new CaptureBudgetClock('note-a',undefined,()=>now);now=60000;await cp.budget(clock.snapshot());oldBudget=cp.budget;task.pause();}
+ }});
+ await task.run();expect(task.state.post?.captureBudget?.elapsedMs).toBe(60000);
+ const saved=JSON.parse(JSON.stringify(task.state));now+=999999;
+ expect(task.state.post?.captureBudget?.elapsedMs).toBe(60000);
+ const seen:number[]=[];const restored=new SerialDiscovery(urls,{...deps,process:async(_u,_s,_p,cp)=>{
+   seen.push(cp.post?.captureBudget?.elapsedMs??0);await oldBudget?.(new CaptureBudgetClock('note-a',undefined,()=>0).snapshot());
+ }},saved);
+ await restored.run();expect(seen).toEqual([60000,0]);expect(restored.state.status).toBe('completed');
+ expect(vi.mocked(deps.navigate).mock.calls.map(c=>c[0])).toEqual(['note-a','note-a','note-b']);
+});
+
+it('D021 同一runner继续时拒绝旧budget回调重置已用预算',async()=>{
+ const {CaptureBudgetClock}=await import('../../src/xhs/capture-budget');
+ let attempts=0;let stale:((b:import('../../src/domain/schemas').CaptureBudget)=>Promise<void>)|undefined;
+ const b=new CaptureBudgetClock('note-a',undefined,()=>0).snapshot();
+ const {task}=setup({process:async(u,_s,_p,cp)=>{
+   if(u!=='note-a')return;
+   if(++attempts===1){await cp.budget({...b,elapsedMs:60000,rounds:24});stale=cp.budget;task.pause();}
+   else {await stale?.(b);expect(task.state.post?.captureBudget).toMatchObject({elapsedMs:60000,rounds:24});}
+ }});
+ await task.run();await task.run();expect(task.state.status).toBe('completed');expect(attempts).toBe(2);
+});
+
+it('回复加载警告随帖子检查点恢复，旧帖回调不能污染下一帖',async()=>{
+ let first=true;let late:((parents:string[])=>Promise<void>)|undefined;
+ const {deps,task}=setup({process:async(_u,_s,_p,cp)=>{
+   if(first){first=false;late=cp.warnings;await cp.warnings(['note-a:parent']);task.pause();}
+ }});
+ await task.run();expect(task.state.post?.replyLoadWarnings).toEqual(['note-a:parent']);
+ const seen:(string[]|undefined)[]=[];
+ const restored=new SerialDiscovery(urls,{...deps,process:async(u,_s,_p,cp)=>{
+   seen.push(cp.post?.replyLoadWarnings);if(u==='note-b')await late?.(['late-a']);
+ }},JSON.parse(JSON.stringify(task.state)));
+ await restored.run();expect(seen).toEqual([['note-a:parent'],undefined]);expect(restored.state.status).toBe('completed');
+});
+
+it.each(['complete','pause','stop'] as const)('固定帖子间隔3秒：%s不提前导航',async action=>{
+ vi.useFakeTimers();try{
+   const {wait}=await import('../../src/discovery/browser');
+   const {deps,task}=setup({betweenPosts:signal=>wait(3000,signal)});
+   const running=task.run();await vi.advanceTimersByTimeAsync(0);
+   expect(deps.navigate).toHaveBeenCalledTimes(1);expect(task.state.post?.stage).toBe('completed');
+   await vi.advanceTimersByTimeAsync(2999);expect(deps.navigate).toHaveBeenCalledTimes(1);
+   if(action==='pause')task.pause();if(action==='stop')task.stop();
+   await vi.advanceTimersByTimeAsync(1);await running;
+   expect(deps.navigate).toHaveBeenCalledTimes(action==='complete'?2:1);
+   expect(task.state.status).toBe(action==='complete'?'completed':action==='pause'?'paused':'stopped');
+ }finally{vi.useRealTimers();}
 });

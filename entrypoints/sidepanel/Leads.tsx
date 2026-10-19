@@ -119,7 +119,8 @@ export default function Leads() {
   );
 
   return (
-    <div style={{ display: 'grid', gap: 10, fontSize: 13 }}>
+    <div className="sl-page" style={{ display: 'grid', gap: 10, fontSize: 13 }}>
+      <h2>线索</h2>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
         <select value={productId ?? ''} onChange={(e) => setProductId(e.target.value || null)}>
           {products.length === 0 && <option value="">（尚无产品）</option>}
@@ -154,7 +155,7 @@ export default function Leads() {
         const note = notes[v.comment.noteKey];
         const stale = current && v.analysis.profileVersion !== current.profileVersion;
         return (
-          <div key={v.analysis.id} style={{ border: '1px solid #ddd', borderRadius: 6, padding: 8, display: 'grid', gap: 4 }}>
+          <div key={v.analysis.id} className="sl-card" style={{ display: 'grid', gap: 6 }}>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12, color: '#777' }}>
               <span style={{ background: '#f3f3f3', borderRadius: 4, padding: '0 6px' }}>{GROUP_TITLES[v.group]}</span>
               <span>{v.source === 'human' ? `人工纠正（模型原判：${GROUP_TITLES[v.modelGroup]}）` : '模型结果'}</span>
@@ -169,7 +170,7 @@ export default function Leads() {
               {v.comment.authorDisplayName ?? '（页面无昵称）'}
               {v.comment.locationText ? ` · ${v.comment.locationText}` : ''}
             </div>
-            {!v.comment.parentKey && <div>{v.comment.text}</div>}
+            {!v.comment.parentKey && !v.comment.isReply && <div>{v.comment.text}</div>}
             <div><b>{v.analysis.decision.needSummary}</b>
               <span style={{ color: '#777', marginLeft: 6 }}>
                 意向：{intentShortCn(v.analysis.decision)} · 匹配：{PRODUCT_FIT_CN[v.analysis.decision.productFit]}

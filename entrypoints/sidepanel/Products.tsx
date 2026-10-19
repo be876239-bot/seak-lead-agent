@@ -6,6 +6,8 @@ import { toErrorPayload } from '../../src/domain/errors';
 import { jobPhaseLabel, isJobActive, STATUS_LABELS, profileUnknownLabels } from '../../src/ui/logic';
 import { emitLocalJobLog } from '../../src/ui/joblog';
 import JobLogPanel from './JobLog';
+import ErrorNotice from '../../src/ui/ErrorNotice';
+import { copyTextToClipboard } from '../../src/ui/clipboard';
 import { getSelectedProductId, setSelectedProductId, ui } from '../../src/ui/store';
 
 const CLAIM_ROWS: { key: 'name' | 'category' | 'summary' | 'accessMethod' | 'price' | 'purchaseChannel'; label: string }[] = [
@@ -41,6 +43,21 @@ const LIST_ROWS = [
 
 function ProfileView({ product }: { product: Product }) {
   const unknowns = profileUnknownLabels(product.profile);
+  const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
+  const [copyFeedback, setCopyFeedback] = useState<{ text: string; error: boolean } | null>(null);
+
+  const copySuggestion = async (suggestion: string, index: number) => {
+    setCopyFeedback(null);
+    try {
+      await copyTextToClipboard(suggestion);
+      setCopiedIndex(index);
+      setCopyFeedback({ text: `已复制“${suggestion}”。切回小红书搜索框粘贴并点击搜索即可。`, error: false });
+    } catch (error) {
+      setCopiedIndex(null);
+      setCopyFeedback({ text: error instanceof Error ? error.message : '复制失败，请手动选择关键词复制', error: true });
+    }
+  };
+
   return (
     <div style={{ display: 'grid', gap: 6, fontSize: 12 }}>
       {unknowns.includes('类别') && (
@@ -84,7 +101,23 @@ function ProfileView({ product }: { product: Product }) {
         );
       })}
       {product.profile.searchSuggestions.length > 0 && (
-        <div><b>建议搜索词</b>：{product.profile.searchSuggestions.join('、')}</div>
+        <section style={{ display: 'grid', gap: 5, borderTop: '1px solid #eee', paddingTop: 6 }}>
+          <b>建议搜索关键词</b>
+          <p style={{ margin: 0, color: '#666' }}>选择一个关键词复制，再粘贴到小红书搜索框并点击搜索。关键词只是建议，可按实际需要修改。</p>
+          {product.profile.searchSuggestions.map((suggestion, index) => (
+            <div key={`${index}:${suggestion}`} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ flex: 1, overflowWrap: 'anywhere' }}>{suggestion}</span>
+              <button type="button" onClick={() => void copySuggestion(suggestion, index)}>
+                {copiedIndex === index ? '已复制' : '复制关键词'}
+              </button>
+            </div>
+          ))}
+          {copyFeedback && (
+            <p role={copyFeedback.error ? 'alert' : 'status'} style={{ margin: 0, color: copyFeedback.error ? '#b42318' : '#067647' }}>
+              {copyFeedback.text}
+            </p>
+          )}
+        </section>
       )}
     </div>
   );
@@ -211,8 +244,9 @@ export default function Products() {
     ? products.find((p) => urlKey(p.inputUrl) === key || urlKey(p.finalUrl) === key)
     : undefined;
   return (
-    <div style={{ display: 'grid', gap: 10, fontSize: 13 }}>
-      <div style={{ display: 'flex', gap: 6 }}>
+    <div className="sl-page" style={{ display: 'grid', gap: 10, fontSize: 13 }}>
+      <h2>产品</h2>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'stretch' }}>
         <input
           value={url}
           onChange={(e) => setUrl(e.target.value)}
@@ -220,7 +254,7 @@ export default function Products() {
           style={{ flex: 1 }}
           disabled={busy}
         />
-        <button onClick={() => void start()} disabled={busy}>{busy ? '识别中…' : '读取并生成画像'}</button>
+        <button className="sl-button--primary" onClick={() => void start()} disabled={busy}>{busy ? '识别中…' : '读取并生成画像'}</button>
         {busy && <button onClick={() => void cancel()}>取消</button>}
       </div>
       {job && (
@@ -230,10 +264,10 @@ export default function Products() {
           {job.status === 'analyzing' && '：模型生成画像中'}
         </p>
       )}
-      {error && <p style={{ color: '#c00', margin: 0 }}>{error}</p>}
+      {error && <ErrorNotice message={error} tone="error" />}
       {info && <p style={{ color: '#0a7', margin: 0 }}>{info}</p>}
       {match && (
-        <div style={{ background: '#f0f7ff', border: '1px solid #91d5ff', borderRadius: 6, padding: 8, fontSize: 12 }}>
+        <div className="sl-notice sl-notice--info" style={{ fontSize: 12 }}>
           这个链接已识别过：{match.profile.name.value ?? hostOf(match.inputUrl)}（画像 v{match.profileVersion}，{match.updatedAt.slice(0, 16).replace('T', ' ')} 更新）。
           <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
             <button onClick={() => void reuse(match)}>直接复用（不调用模型）</button>
@@ -246,7 +280,7 @@ export default function Products() {
       {products.map((p) => {
         const name = p.profile.name.value ?? p.inputUrl;
         return (
-          <div key={p.id} style={{ border: '1px solid #ddd', borderRadius: 6, padding: 8 }}>
+          <div key={p.id} className="sl-card" style={{ display: 'grid', gap: 8 }}>
             <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
               <label style={{ display: 'flex', gap: 4, alignItems: 'center', flex: 1 }}>
                 <input

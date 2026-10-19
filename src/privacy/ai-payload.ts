@@ -11,6 +11,7 @@ export type ClassificationItem = {
   sourceId: string;
   text: string;
   parent: { sourceId: string; text: string } | null;
+  replyContext?: 'parent_unavailable';
 };
 
 export type ClassificationInput = {
@@ -104,7 +105,7 @@ export function buildClassificationInput(
         parent = { sourceId: `${pid}:text`, text: redactText(p.text) };
       }
     }
-    items.push({ commentId, sourceId: `${commentId}:text`, text: redactText(c.text), parent });
+    items.push({ commentId, sourceId: `${commentId}:text`, text: redactText(c.text), parent, ...((c.isReply || c.parentKey) && !parent ? {replyContext:'parent_unavailable' as const} : {}) });
     idMap.push({ commentKey: c.commentKey, tempId: commentId });
   }
 

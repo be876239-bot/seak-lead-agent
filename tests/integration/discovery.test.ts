@@ -1,6 +1,7 @@
 import {readFileSync} from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import { SerialDiscovery, type DiscoveryDeps } from '../../src/discovery/serial';
+import { LIMITS } from '../../src/domain/limits';
 import { readSearchNotes, platformBlock, noteKeyFromUrl, noteUrl } from '../../src/xhs/discovery-dom';
 
 const urls = Array.from({length: 8}, (_,i) => `https://www.xiaohongshu.com/explore/${String(i+1).padStart(24,'a')}`);
@@ -15,6 +16,16 @@ function search() { document.body.innerHTML = `<section class="note-item"><a hre
 describe('bounded serial discovery', () => {
   it('search cards yield normal same-origin note links, stable dedup, exclude other origins', () => { search(); expect(readSearchNotes(document, 'https://www.xiaohongshu.com/search_result?keyword=AI')).toEqual([urls[0]]); });
   it('refuses non-search source pages', () => { search(); expect(() => readSearchNotes(document, urls[0]!)).toThrow(); });
+  it('extracts up to 100 unique notes from already-loaded search cards when configured', () => {
+    document.body.innerHTML=Array.from({length:120},(_,i)=>`<section class="note-item"><a href="https://www.xiaohongshu.com/explore/${String(i+1).padStart(24,'a')}">note</a></section>`).join('');
+    const found=readSearchNotes(document,'https://www.xiaohongshu.com/search_result?keyword=AI',100);
+    expect(found).toHaveLength(100);expect(new Set(found.map(noteKeyFromUrl)).size).toBe(100);
+  });
+  it('configures a 100-post queue while keeping serial execution', async () => {
+    const many=Array.from({length:120},(_,i)=>`note-${i}`);const {deps}=setup();
+    const task=new SerialDiscovery(many,deps,undefined,100);await task.run();
+    expect(task.state.status).toBe('completed');expect(task.state.total).toBe(100);expect(deps.navigate).toHaveBeenCalledTimes(100);expect(deps.process).toHaveBeenCalledTimes(100);
+  });
   it('navigates at most five notes serially and waits for readiness before processing', async () => {
     const order: string[] = []; let concurrent = 0;
     const {task} = setup({navigate: async u => { expect(concurrent).toBe(0); concurrent++; order.push('navigate:'+u); }, ready: async () => { order.push('ready'); }, process: async (u) => { order.push('process:'+u); concurrent--; }});
@@ -38,13 +49,26 @@ describe('bounded serial discovery', () => {
     const {task,deps}=setup({process: async (_u,_s,p) => { p(500,1); }}); await task.run();
     expect(task.state.status).toBe('completed'); expect(deps.navigate).toHaveBeenCalledTimes(5); expect(task.state.comments).toBe(2500); expect(task.state.reason).toBeNull();
   });
-  it('wall-clock deadline stops without another navigation', async () => {
-    let now=0; const {task,deps}=setup({now:()=>now,process:async()=>{now=600001;}}); await task.run();
-    expect(task.state.status).toBe('stopped'); expect(deps.navigate).toHaveBeenCalledTimes(1);
+  it('has no task-wide deadline and pauses when one post active timeout expires', async () => {
+    vi.useFakeTimers();try {
+      const {task,deps}=setup({postTimeoutMs:1000,process:async(_u,signal)=>new Promise<void>(resolve=>signal.addEventListener('abort',()=>resolve(),{once:true}))});
+      const pending=task.run();await vi.advanceTimersByTimeAsync(1000);await pending;
+      expect(task.state.status).toBe('paused');expect(task.state.reason).toContain('主动处理达到');expect(deps.navigate).toHaveBeenCalledTimes(1);
+    } finally {vi.useRealTimers();}
   });
-  it('deadline also applies to paused time and cannot be reset by Continue', async () => {
-    let now=0; const {task,deps}=setup({now:()=>now,process:async()=>{task.pause();}}); await task.run(); now=600001; await task.run();
-    expect(deps.navigate).toHaveBeenCalledTimes(1); expect(task.state.status).toBe('stopped');
+  it('paused time does not consume the single-post active timeout budget', async () => {
+    vi.useFakeTimers();try {
+      let calls=0;const {task,deps}=setup({postTimeoutMs:1000,process:async(_u,signal)=>{
+        if(++calls===1){await new Promise<void>(resolve=>setTimeout(resolve,400));task.pause();return;}
+        await new Promise<void>(resolve=>signal.addEventListener('abort',()=>resolve(),{once:true}));
+      }});
+      const first=task.run();await vi.advanceTimersByTimeAsync(400);await first;
+      expect(task.state.status).toBe('paused');expect(task.state.postElapsedMs).toBe(400);
+      await vi.advanceTimersByTimeAsync(5000);expect(task.state.status).toBe('paused');
+      const resumed=task.run();await vi.advanceTimersByTimeAsync(599);expect(task.state.status).toBe('running');
+      await vi.advanceTimersByTimeAsync(1);await resumed;
+      expect(task.state.status).toBe('paused');expect(task.state.reason).toContain('主动处理达到');expect(deps.navigate).toHaveBeenCalledTimes(2);
+    } finally {vi.useRealTimers();}
   });
   it.each(['CAPTCHA','登录失效','页面结构异常','浏览器权限异常','连续加载失败'])('%s pauses once without refresh or automatic retry', async message => {
     const {task,deps}=setup({ready:async()=>{throw new Error(message);}}); await task.run();
@@ -67,15 +91,15 @@ it('timer guard interrupts an in-flight operation on verification and never open
   expect(task.state.status).toBe('paused');expect(task.state.reason).toBe('安全验证');expect(deps.navigate).toHaveBeenCalledTimes(1);
  }finally{vi.useRealTimers();}
 });
-it('time limit aborts in-flight work without waiting for it to finish normally',async()=>{
+it('single-post timeout pauses in-flight work without a task-wide cutoff',async()=>{
  vi.useFakeTimers();try{
- const {task,deps}=setup({process:async(_u,signal)=>new Promise<void>(resolve=>signal.addEventListener('abort',()=>resolve(),{once:true}))});
- const pending=task.run();await vi.advanceTimersByTimeAsync(600000);await pending;
- expect(task.state.status).toBe('stopped');expect(deps.navigate).toHaveBeenCalledTimes(1);
+ const {task,deps}=setup({postTimeoutMs:1000,process:async(_u,signal)=>new Promise<void>(resolve=>signal.addEventListener('abort',()=>resolve(),{once:true}))});
+ const pending=task.run();await vi.advanceTimersByTimeAsync(1000);await pending;
+ expect(task.state.status).toBe('paused');expect(task.state.reason).toContain('主动处理达到');expect(deps.navigate).toHaveBeenCalledTimes(1);
  }finally{vi.useRealTimers();}
 });
-it('restored task preserves deadline and aggregate counts rather than resetting task limits',async()=>{
- const {deps}=setup();const task=new SerialDiscovery(urls,deps,{status:'paused',index:2,total:5,comments:80,currentComments:0,leads:12,currentLeads:0,phase:'paused',reason:null,deadline:Date.now()+10000});
+it('restored task preserves per-post elapsed time and aggregate counts',async()=>{
+ const {deps}=setup();const task=new SerialDiscovery(urls,deps,{status:'paused',index:2,total:5,comments:80,currentComments:0,leads:12,currentLeads:0,phase:'paused',reason:null,postElapsedMs:1234});
  await task.run();expect(deps.navigate).toHaveBeenCalledTimes(3);expect(task.state.comments).toBe(200);expect(task.state.leads).toBe(30);
 });
 it('resume of partly captured note does not double count progress',async()=>{
@@ -83,8 +107,8 @@ it('resume of partly captured note does not double count progress',async()=>{
  await task.run();await task.run();expect(task.state.comments).toBe(200);expect(task.state.leads).toBe(30);
 });
 
-it('暂停期间截止时间到达也会停止，不能后台无限等待',async()=>{
- vi.useFakeTimers();try{const {task}=setup({process:async()=>{task.pause();}});await task.run();await vi.advanceTimersByTimeAsync(600000);expect(task.state.status).toBe('stopped');}finally{vi.useRealTimers();}
+it('暂停很久不会自动退出或消耗单篇主动运行预算',async()=>{
+ vi.useFakeTimers();try{const {task}=setup({postTimeoutMs:1000,process:async()=>{task.pause();}});await task.run();await vi.advanceTimersByTimeAsync(3600000);expect(task.state.status).toBe('paused');expect(task.state.postElapsedMs).toBe(0);}finally{vi.useRealTimers();}
 });
 
 it('历史真实脱敏fixture的卡片结构可提取5篇；仅替换匿名ID为格式合法的合成ID',()=>{
@@ -100,6 +124,6 @@ it('返回搜索失败时保留已完成索引，手动继续只重试返回，�
  const finish=vi.fn(async()=>{if(finish.mock.calls.length===1)throw new Error('返回失败');});const {deps}=setup();const task=new SerialDiscovery(urls.slice(0,1),{...deps,finish});
  await task.run();expect(task.state.status).toBe('paused');expect(task.state.index).toBe(1);await task.run();expect(task.state.status).toBe('completed');expect(deps.process).toHaveBeenCalledTimes(1);expect(finish).toHaveBeenCalledTimes(2);
 });
-it('500条单帖上限不阻止后续帖子和最终返回搜索',async()=>{
- const finish=vi.fn(async()=>{});const {task}=setup({finish,process:async(_u,_s,p)=>{p(500,1);}});await task.run();expect(finish).toHaveBeenCalledTimes(1);expect(task.state.status).toBe('completed');
+it('高评论数帖子不会阻止后续帖子和最终返回搜索',async()=>{
+ const finish=vi.fn(async()=>{});const {task}=setup({finish,process:async(_u,_s,p)=>{p(LIMITS.maxSessionComments,1);}});await task.run();expect(finish).toHaveBeenCalledTimes(1);expect(task.state.status).toBe('completed');expect(task.state.comments).toBe(LIMITS.maxSessionComments*5);
 });

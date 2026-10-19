@@ -144,7 +144,7 @@ describe('增量采集（observer + 防抖）', () => {
     expect(deduped.comments).toHaveLength(3);
   });
 
-  it('500 条上限：超出后停止增加并标记 truncated', async () => {
+  it('单帖安全上限：超出后停止增加并标记 truncated', async () => {
     const snap = await startOn(synthPageHtml(LIMITS.maxSessionComments + 3));
     expect(snap.comments).toHaveLength(LIMITS.maxSessionComments);
     expect(snap.truncated).toBe(true);

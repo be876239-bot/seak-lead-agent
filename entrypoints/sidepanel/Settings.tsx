@@ -45,7 +45,7 @@ function RetentionSection() {
   };
 
   return (
-    <section style={{ display: 'grid', gap: 6 }}>
+    <section className="sl-card" style={{ display: 'grid', gap: 6 }}>
       <h2 style={{ fontSize: 14, margin: 0 }}>数据保留期</h2>
       <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
         <select value={days} onChange={(e) => void save(Number(e.target.value))}>
@@ -86,7 +86,7 @@ function UsageSection() {
 
   const cny = estimateCny(summary, price);
   return (
-    <section style={{ display: 'grid', gap: 6 }}>
+    <section className="sl-card" style={{ display: 'grid', gap: 6 }}>
       <h2 style={{ fontSize: 14, margin: 0 }}>模型用量（本机累计）</h2>
       <p style={{ margin: 0 }}>
         调用 {summary.calls} 次：成功 {summary.success}、失败 {summary.failed}、结果未知 {summary.unknown}。
@@ -131,8 +131,9 @@ export default function Settings() {
   }, []);
 
   return (
-    <div style={{ display: 'grid', gap: 16, fontSize: 13 }}>
-      <section style={{ display: 'grid', gap: 8 }}>
+    <div className="sl-page" style={{ display: 'grid', gap: 16, fontSize: 13 }}>
+      <h2>设置</h2>
+      <section className="sl-card" style={{ display: 'grid', gap: 8 }}>
         <h2 style={{ fontSize: 14, margin: 0 }}>模型与 Key</h2>
         <p style={{ margin: 0 }}>{PROVIDER_PRESETS[presetId].label}</p>
         <label>
@@ -164,6 +165,7 @@ export default function Settings() {
         </label>
         <div style={{ display: 'flex', gap: 8 }}>
           <button
+            className="sl-button--primary"
             onClick={async () => {
               if (!apiKey.trim()) { setStatus('请先输入 Key'); return; }
               try {

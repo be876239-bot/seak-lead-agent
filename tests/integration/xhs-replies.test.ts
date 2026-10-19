@@ -5,6 +5,7 @@ import {beforeEach,afterEach,it,expect,vi} from 'vitest';
 import {XhsSessionManager} from '../../src/xhs/session';
 import {buildOk,buildError,RequestSchema} from '../../src/messaging/protocol';
 import {toErrorPayload} from '../../src/domain/errors';
+import {LIMITS} from '../../src/domain/limits';
 import {SeekLeadDb} from '../../src/storage/db';
 import {Repositories} from '../../src/storage/repositories';
 import {CommentSchema,ProductProfileSchema,type Comment,type Note,type CaptureProgress} from '../../src/domain/schemas';
@@ -42,10 +43,10 @@ it('B–F 正常展开、再展开、虚拟移除/重渲染、去重、多个父
  for(const id of ['A1','A2'])expect((await db.comments.get(key+':'+id))?.parentKey).toBe(key+':A');expect((await db.comments.get(key+':B1'))?.parentKey).toBe(key+':B');
  expect(document.querySelector('#comment-A1')).toBeNull();expect(states.some(p=>p.loadingReplies)).toBe(true);expect(states.at(-1)).toMatchObject({topLevelCount:2,replyCount:3});
 });
-it('G 一级评论+回复总500后不能继续展开',async()=>{
- for(let i=0;i<496;i++)document.querySelector('.list-container')!.insertAdjacentHTML('beforeend',`<div class="parent-comment"><div class="comment-item" id="comment-extra${i}"><div class="content"><span class="note-text">合成一级${i}</span></div></div></div>`);
+it('G 达到单帖安全上限后不能继续展开回复',async()=>{
+ for(let i=0;i<LIMITS.maxSessionComments-4;i++)document.querySelector('.list-container')!.insertAdjacentHTML('beforeend',`<div class="parent-comment"><div class="comment-item" id="comment-extra${i}"><div class="content"><span class="note-text">合成一级${i}</span></div></div></div>`);
  const a=vi.fn(()=>{area('A').insertAdjacentHTML('afterbegin',reply('A1')+reply('A2'));});control('A').onclick=a;const b=vi.fn();control('B').onclick=b;
- const snap=await captureNote(7,{autoLoad:true,wait,onDelta:persist});expect(snap.comments).toHaveLength(500);expect(await db.comments.count()).toBe(500);expect(a).toHaveBeenCalledTimes(1);expect(b).not.toHaveBeenCalled();
+ const snap=await captureNote(7,{autoLoad:true,wait,onDelta:persist});expect(snap.comments).toHaveLength(LIMITS.maxSessionComments);expect(await db.comments.count()).toBe(LIMITS.maxSessionComments);expect(a).toHaveBeenCalledTimes(1);expect(b).not.toHaveBeenCalled();
 });
 it('H 取消后不再展开或写入迟到回复',async()=>{
  const ac=new AbortController();const a=vi.fn();control('A').onclick=a;
@@ -68,9 +69,13 @@ it('父评论无平台ID仍按DOM父容器关联，不能把回复变成一级�
  wrapper('A').querySelector('.comment-item')!.removeAttribute('id');control('A').onclick=()=>{area('A').innerHTML=reply('A1');};control('B').remove();
  const snap=await captureNote(7,{autoLoad:true,wait,onDelta:persist});const top=snap.comments.find(c=>c.text==='这个多少钱？')!;expect(snap.comments.find(c=>c.platformCommentId==='A1')?.parentKey).toBe(top.commentKey);
 });
-it('展开无响应只点击一次，等待上限后明确失败，不无限点击或伪报无更多',async()=>{
- const click=vi.fn();control('A').onclick=click;
- await expect(captureNote(7,{autoLoad:true,wait,onDelta:persist})).rejects.toMatchObject({code:'PARSE_FAILED'});expect(click).toHaveBeenCalledTimes(1);expect(await db.comments.count()).toBe(2);
+it('展开无响应只点一次并记录警告，正常停止而不阻塞整帖',async()=>{
+ const a=vi.fn(),b=vi.fn();control('A').onclick=a;control('B').onclick=b;
+ const progress:CaptureProgress[]=[];
+ const snap=await captureNote(7,{autoLoad:true,wait,onDelta:persist,onProgress:p=>{progress.push(p);}});
+ expect(a).toHaveBeenCalledTimes(1);expect(b).toHaveBeenCalledTimes(1);expect(await db.comments.count()).toBe(2);
+ expect(snap.replyLoadWarningCount).toBe(2);expect(snap.stopReason).toBe('no_new');
+ expect(progress.at(-1)?.replyLoadWarningCount).toBe(2);
 });
 
 it('H2 展开等待期间取消：迟到回复不落库，下一组不展开',async()=>{
@@ -89,4 +94,100 @@ it('虚拟列表移除一级评论DOM但保留同一回复容器时，仍用已�
  control('B').remove();let clicks=0;area('A').addEventListener('click',e=>{if(!(e.target as Element).closest('.show-more'))return;clicks++;if(clicks===1){area('A').insertAdjacentHTML('afterbegin',reply('A1'));control('A').textContent='展开更多回复';}else area('A').innerHTML=reply('A2');});
  const snap=await captureNote(7,{autoLoad:true,onDelta:persist,wait:async()=>{await wait();if(await db.comments.get(key+':A1'))wrapper('A').querySelector(':scope > .comment-item')?.remove();}});
  expect(clicks).toBe(2);expect(snap.comments.filter(c=>c.parentKey===key+':A')).toHaveLength(2);expect((await db.comments.get(key+':A2'))?.parentKey).toBe(key+':A');
+});
+
+it('同一快照中回复位于一级评论之前时仍按真实容器关联',async()=>{
+ const root=wrapper('A').querySelector('.comment-item')!;
+ area('A').insertAdjacentHTML('afterbegin',reply('A1'));
+ wrapper('A').append(root);
+ const snap=await captureNote(7,{onDelta:persist});
+ expect(snap.comments.find(c=>c.platformCommentId==='A1')?.parentKey).toBe(key+':A');
+ expect(await db.comments.get(key+':A1')).toBeDefined();
+});
+it('首屏为空、回复先到、父评论延迟到达：有界等待后继续且不滚动跳过',async()=>{
+ const root=wrapper('A').querySelector('.comment-item')!;
+ root.remove();area('A').innerHTML='';wrapper('B').remove();
+ let rounds=0;
+ const snap=await captureNote(7,{autoLoad:true,onDelta:persist,wait:async()=>{
+   await wait();rounds++;
+   if(rounds===1)area('A').innerHTML=reply('A1');
+   if(rounds===3)wrapper('A').prepend(root);
+ }});
+ expect(snap.comments).toHaveLength(2);
+ expect((await db.comments.get(key+':A1'))?.parentKey).toBe(key+':A');
+});
+it('父关系始终缺失仍保存为回复并正常结束，不展开未知父控件',async()=>{
+ wrapper('A').querySelector('.comment-item')!.remove();wrapper('B').remove();
+ area('A').insertAdjacentHTML('afterbegin',reply('A1'));
+ const click=vi.fn();control('A').onclick=click;
+ const progress:CaptureProgress[]=[];
+ const snap=await captureNote(7,{autoLoad:true,onDelta:persist,wait,onProgress:p=>{progress.push(p);}});
+ expect(snap.comments).toHaveLength(1);
+ expect(await db.comments.get(key+':A1')).toMatchObject({isReply:true,parentKey:null});
+ expect(click).not.toHaveBeenCalled();
+ expect(progress.at(-1)).toMatchObject({replyCount:1,topLevelCount:0,unresolvedReplyCount:1});
+});
+it.each([true,false])('回复移出DOM后父评论出现仍补关系并更新数据库，稳定ID=%s',async(strong)=>{
+ const root=wrapper('A').querySelector('.comment-item')!;root.remove();wrapper('B').remove();
+ area('A').innerHTML=reply('A1');const child=area('A').firstElementChild!;
+ if(!strong)child.removeAttribute('id');
+ let originalKey='';let first=true;let orphanPersisted=false;
+ const snap=await captureNote(7,{autoLoad:true,wait,onDelta:async(note,comments)=>{
+   await persist(note,comments);
+   if(first){first=false;const orphan=comments.find(c=>c.isReply)!;originalKey=orphan.commentKey;
+     expect(orphan.parentKey).toBeNull();orphanPersisted=true;
+     child.remove();wrapper('A').prepend(root);area('A').querySelector('.show-more')?.remove();
+   }
+ }});
+ expect(orphanPersisted).toBe(true);
+ expect(snap.comments).toHaveLength(2);
+ expect(snap.comments.find(c=>c.isReply)).toMatchObject({commentKey:originalKey,parentKey:key+':A'});
+ expect(await db.comments.get(originalKey)).toMatchObject({isReply:true,parentKey:key+':A'});
+ expect(await db.comments.count()).toBe(2);
+});
+
+it('未关联回复也受单帖安全上限保护且可取消',async()=>{
+ wrapper('A').querySelector('.comment-item')!.remove();wrapper('B').remove();
+ area('A').innerHTML=Array.from({length:LIMITS.maxSessionComments+10},(_,i)=>reply('orphan'+i)).join('');
+ const snap=await captureNote(7,{autoLoad:true,onDelta:persist,wait});
+ expect(snap.comments).toHaveLength(LIMITS.maxSessionComments);expect(snap.stopReason).toBe('limit');
+ expect(await db.comments.count()).toBe(LIMITS.maxSessionComments);
+ expect(snap.comments.every(c=>c.isReply && c.parentKey===null)).toBe(true);
+});
+it('取消后迟到的未关联回复不再落库',async()=>{
+ wrapper('A').querySelector('.comment-item')!.remove();wrapper('B').remove();area('A').innerHTML=reply('orphan');
+ const controller=new AbortController();
+ await expect(captureNote(7,{autoLoad:true,signal:controller.signal,onDelta:async(n,c)=>{await persist(n,c);controller.abort();area('A').insertAdjacentHTML('beforeend',reply('late'));},wait})).rejects.toMatchObject({code:'CANCELLED'});
+ expect(await db.comments.count()).toBe(1);expect(await db.comments.get(key+':late')).toBeUndefined();
+});
+
+it('超时后继续其他父评论、迟到回复仍落库，重渲染和计数/文案变化不重复点击失败入口',async()=>{
+ let aClicks=0;area('A').addEventListener('click',()=>{aClicks++;});
+ const b=vi.fn(()=>{area('B').innerHTML=reply('B1','其他组回复');});control('B').onclick=b;
+ let late=false;
+ const snap=await captureNote(7,{autoLoad:true,onDelta:persist,wait:async()=>{
+   await wait();if(clock>=12000&&!late){late=true;area('A').innerHTML=reply('A1','迟到回复')+'<div class="show-more">查看全部回复</div>';}
+ }});
+ expect(aClicks).toBe(1);expect(b).toHaveBeenCalledTimes(1);expect(snap.comments).toHaveLength(4);
+ expect((await db.comments.get(key+':A1'))?.parentKey).toBe(key+':A');
+ expect((await db.comments.get(key+':B1'))?.parentKey).toBe(key+':B');
+ expect(snap.replyLoadWarningCount).toBe(1);expect(snap.stopReason).toBe('no_new');
+});
+it('超时后出现安全验证仍立即停止，不点击下一组',async()=>{
+ const a=vi.fn(),b=vi.fn();control('A').onclick=a;control('B').onclick=b;
+ await expect(captureNote(7,{autoLoad:true,onDelta:persist,wait,onReplyLoadWarnings:async parents=>{
+   // 在超时警告发出后、下一组展开之前插入验证，精确验证安全守卫。
+   if(parents.length)document.body.insertAdjacentHTML('beforeend','<div class="login-container">安全验证</div>');
+ }})).rejects.toMatchObject({code:'PAGE_BLOCKED'});
+ expect(a).toHaveBeenCalledTimes(1);expect(b).not.toHaveBeenCalled();expect(await db.comments.count()).toBe(2);
+});
+it('暂停重建session时仍跳过已保存的失败入口并保留不完整标记',async()=>{
+ const a=vi.fn();control('A').onclick=a;control('B').remove();
+ const warnings:string[][]=[];const ac=new AbortController();
+ await expect(captureNote(7,{autoLoad:true,signal:ac.signal,onDelta:persist,wait,onReplyLoadWarnings:async parents=>{
+   warnings.push(parents);if(parents.length)ac.abort();
+ }})).rejects.toMatchObject({code:'CANCELLED'});
+ expect(a).toHaveBeenCalledTimes(1);
+ const snap=await captureNote(7,{autoLoad:true,onDelta:persist,wait,initialReplyLoadWarnings:warnings.at(-1)});
+ expect(a).toHaveBeenCalledTimes(1);expect(snap.replyLoadWarningCount).toBe(1);expect(snap.comments).toHaveLength(2);
 });

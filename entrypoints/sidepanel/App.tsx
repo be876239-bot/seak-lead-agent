@@ -19,20 +19,30 @@ export default function App() {
   const [tab, setTab] = useState<Tab>('products');
   const version = browser.runtime.getManifest().version;
   return (
-    <div style={{ padding: 12, fontFamily: 'system-ui, sans-serif', fontSize: 14 }}>
-      <h1 style={{ fontSize: 16, margin: '4px 0 10px' }}>觅客Agent <span style={{ color: '#999', fontWeight: 400 }}>v{version}</span></h1>
-      <nav style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
+    <div className="sl-app">
+      <header className="sl-header">
+        <h1 className="sl-brand">觅客 Agent <span className="sl-version">v{version}</span></h1>
+      </header>
+      <nav className="sl-nav" aria-label="主要功能">
         {TABS.map((t) => (
-          <button key={t.id} onClick={() => setTab(t.id)} style={{ fontWeight: tab === t.id ? 700 : 400 }}>
+          <button
+            key={t.id}
+            type="button"
+            className="sl-nav__button"
+            aria-pressed={tab === t.id}
+            onClick={() => setTab(t.id)}
+          >
             {t.label}
           </button>
         ))}
       </nav>
-      {tab === 'discovery' && <Discovery />}
-      {tab === 'settings' && <Settings />}
-      {tab === 'products' && <Products />}
-      {tab === 'note' && <CurrentNote />}
-      {tab === 'leads' && <Leads />}
+      <main className="sl-main">
+        {tab === 'discovery' && <Discovery />}
+        {tab === 'settings' && <Settings />}
+        {tab === 'products' && <Products />}
+        {tab === 'note' && <CurrentNote />}
+        {tab === 'leads' && <Leads />}
+      </main>
     </div>
   );
 }

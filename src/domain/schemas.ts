@@ -84,6 +84,8 @@ export const CommentSchema = z.object({
   noteKey: z.string().min(1).max(256),
   platformCommentId: z.string().max(128).nullable(),
   parentKey: z.string().max(512).nullable(),
+  /** 旧数据缺省时按 parentKey 判断；true + null 表示父关系未确认的回复。 */
+  isReply: z.boolean().optional(),
   text: z.string().min(1).max(LIMITS.maxCommentChars),
   authorDisplayName: z.string().max(120).nullable(),
   authorLocalKey: z.string().max(256).nullable(),
@@ -160,11 +162,28 @@ export const DiscoveryNavigationSchema=z.object({
 export type DiscoveryNavigation=z.infer<typeof DiscoveryNavigationSchema>;
 
 export const JobKind = z.enum(['product', 'comments', 'discovery']);
+export const CaptureBudgetSchema = z.object({
+  noteKey:z.string().min(1).max(256),
+  displayedCommentCount:z.number().int().nonnegative().nullable().default(null),
+  elapsedMs:z.number().min(0).max(LIMITS.captureHardDurationMs),
+  rounds:z.number().int().min(0).max(LIMITS.captureHardRounds),
+  durationMs:z.number().min(LIMITS.captureMaxDurationMs).max(LIMITS.captureHardDurationMs),
+  maxRounds:z.number().int().min(LIMITS.captureMaxRounds).max(LIMITS.captureHardRounds),
+  progressCount:z.number().int().min(0).max(LIMITS.maxSessionComments),
+  lastProgressElapsedMs:z.number().min(0).max(LIMITS.captureHardDurationMs),
+  extensionCount:z.number().int().min(0).max(LIMITS.maxSessionComments),
+  lastExtensionElapsedMs:z.number().min(0).max(LIMITS.captureHardDurationMs),
+});
+export type CaptureBudget = z.infer<typeof CaptureBudgetSchema>;
+export const ReplyLoadWarningsSchema=z.array(z.string().min(1).max(512)).max(LIMITS.maxReplyActions);
 export const CaptureProgressSchema = z.object({
+  replyLoadWarningCount:z.number().int().min(0).max(LIMITS.maxReplyActions).optional(),
+  budget:CaptureBudgetSchema.optional(),
   discoveredCount: z.number().int().min(0).max(LIMITS.maxSessionComments),
   addedCount: z.number().int().min(0).max(LIMITS.maxSessionComments),
   topLevelCount: z.number().int().min(0).max(LIMITS.maxSessionComments).optional(),
   replyCount: z.number().int().min(0).max(LIMITS.maxSessionComments).optional(),
+  unresolvedReplyCount: z.number().int().min(0).max(LIMITS.maxSessionComments).optional(),
   loadingReplies: z.boolean().optional(),
   /** Page-displayed comment total; informational because platform counting may differ from accessible DOM comments. */
   displayedCommentCount: z.number().int().nonnegative().nullable().optional(),
@@ -197,14 +216,15 @@ export const JobSchema = z.object({
   errorCode: z.string().max(64).nullable(),
   collection: CaptureProgressSchema.optional(),
   discovery: z.object({
-    status:z.enum(['running','paused','stopped','completed']),index:z.number().int().min(0).max(5),total:z.number().int().min(0).max(5),
-    comments:z.number().int().nonnegative(),currentComments:z.number().int().min(0).max(500),leads:z.number().int().nonnegative(),currentLeads:z.number().int().nonnegative(),
+    status:z.enum(['running','paused','stopped','completed']),index:z.number().int().min(0).max(100),total:z.number().int().min(0).max(100),
+    comments:z.number().int().nonnegative(),currentComments:z.number().int().min(0).max(LIMITS.maxSessionComments),leads:z.number().int().nonnegative(),currentLeads:z.number().int().nonnegative(),
     navigation:DiscoveryNavigationSchema.optional(),
-    completedNoteKeys:z.array(z.string().max(256)).max(5).optional(),
-    post:z.object({stage:z.enum(['capturing','captured','completed']),commentKeys:z.array(z.string().max(512)).max(500)}).optional(),
+    completedNoteKeys:z.array(z.string().max(256)).max(100).optional(),
+    partialPosts:z.number().int().min(0).max(100).optional(),
+    post:z.object({stage:z.enum(['capturing','captured','completed','partial']),commentKeys:z.array(z.string().max(512)).max(LIMITS.maxSessionComments),captureBudget:CaptureBudgetSchema.optional(),replyLoadWarnings:ReplyLoadWarningsSchema.optional()}).optional(),
     trace:z.array(DiscoveryTraceSchema).max(200).optional(),
-    targets:z.array(z.string().url().max(LIMITS.maxUrlChars)).max(5),sourceTabId:z.number().int().nonnegative(),
-    phase:z.string().max(300),reason:z.string().max(500).nullable(),deadline:z.number(),direction:z.string().max(200),
+    targets:z.array(z.string().url().max(LIMITS.maxUrlChars)).max(100),sourceTabId:z.number().int().nonnegative(),
+    phase:z.string().max(300),reason:z.string().max(500).nullable(),postElapsedMs:z.number().int().min(0).max(LIMITS.discoveryPostTimeoutMs).default(0),direction:z.string().max(200),
   }).optional(),
 });
 export type Job = z.infer<typeof JobSchema>;

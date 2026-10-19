@@ -41,7 +41,7 @@ export function noteKeyFromUrl(value: string): string {
   return 'xhs:'+new URL(url).pathname.split('/').filter(Boolean).at(-1)!;
 }
 /** 使用历史fixture证实的卡片/链接；只读取当前已加载搜索结果，既不搜索接口也不滚动搜索页。 */
-export function readSearchNotes(doc: Document, location: string): string[] {
+export function readSearchNotes(doc: Document, location: string, maxResults=5): string[] {
   const url=new URL(location);
   const block=platformBlock(doc);if(block)throw new AppError('PAGE_BLOCKED',block);
   if(url.origin!=='https://www.xiaohongshu.com'||url.pathname!=='/search_result') throw new AppError('PAGE_UNSUPPORTED','请先在小红书正常搜索并保留搜索结果页');
@@ -49,7 +49,7 @@ export function readSearchNotes(doc: Document, location: string): string[] {
   const seen=new Set<string>();const found:string[]=[];
   for(const a of doc.querySelectorAll('section.note-item a[href]')) {
     const href=noteUrl(a.getAttribute('href')??'',url.origin);if(!href)continue;
-    const key=noteKeyFromUrl(href);if(seen.has(key))continue;seen.add(key);found.push(href);if(found.length===5)break;
+    const key=noteKeyFromUrl(href);if(seen.has(key))continue;seen.add(key);found.push(href);if(found.length>=Math.max(1,Math.min(100,Math.floor(maxResults))))break;
   }
   if(!found.length)throw new AppError('PARSE_FAILED','当前搜索结果没有可识别的公开笔记链接；不会调用私有接口');
   return found;

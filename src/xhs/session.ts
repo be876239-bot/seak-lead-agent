@@ -1,4 +1,4 @@
-import { clickSearchNote, closeNote, searchState } from './navigation';
+import { clickSearchNote, closeNote, searchState, scrollSearchResults } from './navigation';
 import { platformBlock, readSearchNotes } from './discovery-dom';
 import { AppError } from '../domain/errors';
 import { LIMITS } from '../domain/limits';
@@ -39,6 +39,7 @@ class ActiveSession {
   note: Note;
   buffer: Comment[] = [];
   keySet = new Set<string>();
+  unresolvedReplies = new Map<string, ParsedComment>();
   elementKey = new Map<string, string>();
   elementOrdinal = new Map<string, number>();
   weakElements = new WeakMap<Element, { signature: string; ordinal: number }>();
@@ -49,6 +50,7 @@ class ActiveSession {
   replyLoad: {parentKey:string;before:number;startedAt:number;lastCount:number;changedAt:number} | null = null;
   replyActions = 0;
   replyRequests = new Set<string>();
+  replyLoadWarnings = new Set<string>();
   version = 0;
   limitReached = false;
   lastActivityAt: number;
@@ -78,12 +80,13 @@ export class XhsSessionManager {
   async handle(req: Request): Promise<unknown> {
     switch (req.type) {
       case 'XHS_GET_STATUS': return this.status();
-      case 'XHS_DISCOVER': return { urls: readSearchNotes(this.getDoc(), this.getDoc().URL), sourceUrl:this.getDoc().URL };
+      case 'XHS_DISCOVER': return { urls: readSearchNotes(this.getDoc(), this.getDoc().URL, req.payload.maxPosts), sourceUrl:this.getDoc().URL };
       case 'XHS_SEARCH_STATE': return searchState(this.getDoc());
       case 'XHS_CLOSE_NOTE': return closeNote(this.getDoc(),req.payload.expectedNoteKey);
       case 'XHS_CLICK_NOTE': return clickSearchNote(this.getDoc(),req.payload.expectedSearchUrl,req.payload.expectedNoteKey);
+      case 'XHS_SCROLL_SEARCH': return scrollSearchResults(this.getDoc(),req.payload.expectedSearchUrl,req.payload.direction);
       case 'XHS_GUARD': { const reason=platformBlock(this.getDoc()); if(reason) throw new AppError('PAGE_BLOCKED',reason); return {ok:true}; }
-      case 'XHS_START_SESSION': return this.start(req.payload.expectedNoteKey);
+      case 'XHS_START_SESSION': return this.start(req.payload.expectedNoteKey,req.payload.replyLoadWarnings);
       case 'XHS_GET_SNAPSHOT': return this.snapshot(req.payload.sessionId, req.payload.expectedNoteKey, req.payload.cursor, req.payload.advance);
       case 'XHS_STOP_SESSION': return this.stop(req.payload.sessionId);
       default: throw new AppError('UNKNOWN', '不支持的消息类型');
@@ -105,7 +108,7 @@ export class XhsSessionManager {
     return { noteKey, parserVersion: PARSER_VERSION, supported: kind === 'note', blocked: false };
   }
 
-  private start(expectedNoteKey: string): SnapshotPayload {
+  private start(expectedNoteKey: string,replyLoadWarnings:string[]=[]): SnapshotPayload {
     const doc = this.getDoc();
     if (pageBlocked(doc)) throw new AppError('PAGE_BLOCKED', '页面被登录或风控遮挡，已停止采集');
     const parsed = parseNote(doc);
@@ -122,6 +125,7 @@ export class XhsSessionManager {
       parserVersion: parsed.parserVersion,
     };
     this.session = new ActiveSession(parsed.noteKey, note, this.now());
+    this.session.replyLoadWarnings=new Set(replyLoadWarnings);
     this.ordinal=0;
     this.knownLists=new WeakSet();
     this.knownAreas=new WeakSet();
@@ -188,19 +192,22 @@ export class XhsSessionManager {
     const count=session.buffer.filter(c=>c.parentKey===pending.parentKey).length;
     if(count!==pending.lastCount){pending.lastCount=count;pending.changedAt=this.now();}
     if(count>pending.before && this.now()-pending.changedAt>=LIMITS.replyQuietMs){session.replyLoad=null;return;}
-    if(count===pending.before && this.now()-pending.startedAt>=LIMITS.replyLoadTimeoutMs)throw new AppError('PARSE_FAILED','回复展开后10秒未发现新增回复；已暂停，请人工检查，已保存结果保留');
+    if(count===pending.before && this.now()-pending.startedAt>=LIMITS.replyLoadTimeoutMs){
+      session.replyLoadWarnings.add(pending.parentKey);session.replyLoad=null;
+    }
   }
 
   /** 一次只加载一组回复，等待增量数据后才能再次展开或滚动；任何动作前再次校验会话与平台状态。 */
   private advanceReplies(): boolean {
     const session=this.session!;
     if(session.replyLoad)return true;
+    if(session.replyLoadWarnings.size>=LIMITS.maxReplyActions)return false;
     for(const {control,parent} of replyExpandControls(this.getDoc())) {
       const parentKey=session.sourceKeys.get(parent) ?? (parent.id?session.elementKey.get(parent.id):undefined);
-      if(!parentKey)throw new AppError('PARSE_FAILED','无法确认回复控件的父评论关系，已暂停');
+      if(!parentKey || session.replyLoadWarnings.has(parentKey))continue; // 不猜测展开控件的父关系；仍保存已正常展示的回复。
       const before=session.buffer.filter(c=>c.parentKey===parentKey).length;
       const requestKey=`${parentKey}\u0001${before}\u0001${(control.textContent??'').replace(/\s+/g,' ').trim()}`;
-      if(session.replyRequests.has(requestKey))throw new AppError('PARSE_FAILED','回复控件未产生新内容，已暂停，禁止重复点击');
+      if(session.replyRequests.has(requestKey))continue; // 同一无进展入口不再点击，也不阻塞其余评论。
       if(session.replyActions>=LIMITS.maxReplyActions)throw new AppError('PARSE_FAILED','达到本帖100次回复展开上限；已暂停，已保存内容保留');
       this.assertLive(session.id,session.noteKey);
       if(session.limitReached)return true;
@@ -234,7 +241,7 @@ export class XhsSessionManager {
   private scrollComments(): void {
     const el=this.scrollContainer();
     if(!el)throw new AppError('PARSE_FAILED', '无法确认当前笔记的评论滚动容器；已停止，已保存评论保留');
-    el.scrollBy({top:Math.max(1,Math.min(400,el.clientHeight*0.5)),behavior:'instant'});
+    el.scrollBy({top:Math.max(1,Math.min(400,el.clientHeight/3)),behavior:'instant'});
   }
 
   private stop(sessionId: string): { stopped: boolean } {
@@ -266,6 +273,7 @@ export class XhsSessionManager {
       note: session.note,
       comments: chunk,
       loadingReplies: session.replyLoad !== null,
+      replyLoadWarnings:[...session.replyLoadWarnings],
       hasMoreLoaded: hasMore,
       truncated: session.limitReached,
       nextCursor: hasMore ? `${session.id}.${session.version}.${offset + chunk.length}` : null,
@@ -279,7 +287,7 @@ export class XhsSessionManager {
     };
   }
 
-  /** 增量读取：先打码再暂存；500 条上限后停止增加。 */
+  /** 增量读取：先打码再暂存；单帖安全上限后停止增加。 */
   private ingest(strict = false, extracted?:ParsedComment[]): void {
     const session = this.session;
     if (!session) return;
@@ -291,7 +299,8 @@ export class XhsSessionManager {
       return;
     }
     const capturedAt = isoNow(this.now);
-    for (const p of parsedList) {
+    // 先登记同一快照的一级评论，父子关联不依赖 DOM 中的排列顺序。
+    for (const p of [...parsedList.filter(p=>!p.isSub), ...parsedList.filter(p=>p.isSub)]) {
       if (session.buffer.length >= LIMITS.maxSessionComments) {
         session.limitReached = true;
         break;
@@ -301,12 +310,12 @@ export class XhsSessionManager {
       const parentKey = p.isSub
         ? (p.parentElementId ? session.elementKey.get(p.parentElementId) : undefined) ?? (p.parentElement ? session.sourceKeys.get(p.parentElement) : undefined) ?? (p.parentContainer ? session.sourceKeys.get(p.parentContainer) : undefined) ?? null
         : null;
-      if(p.isSub && !parentKey){if(strict)throw new AppError('PARSE_FAILED','无法确认回复的父评论关系，已暂停；不会把回复当一级评论');continue;}
       if (p.elementId && !session.elementOrdinal.has(p.elementId)) {
         session.elementOrdinal.set(p.elementId, this.ordinal++);
       }
-      const signature = `${text}\u0001${p.authorLocalKey ?? ''}\u0001${p.publishedText ?? ''}\u0001${parentKey ?? ''}`;
+      const signature = `${text}\u0001${p.authorLocalKey ?? ''}\u0001${p.publishedText ?? ''}`;
       let weak = session.weakElements.get(p.sourceElement);
+      const sameContent = weak?.signature===signature;
       if (!weak || weak.signature !== signature) {
         weak = { signature, ordinal: this.ordinal++ };
         session.weakElements.set(p.sourceElement, weak);
@@ -328,16 +337,29 @@ export class XhsSessionManager {
         if(owner&&owner!==p.sourceElement)identity.commentKey+=`:occ:${ordinal}`;
         else session.weakOwners.set(identity.commentKey,p.sourceElement);
       }
+      // 同一弱身份节点补父关系时沿用原键，不能因 parentKey 改变而新增记录。
+      const previousKey=session.sourceKeys.get(p.sourceElement);
+      if(!p.platformCommentId && previousKey && session.keySet.has(previousKey) && sameContent)identity.commentKey=previousKey;
       session.sourceKeys.set(p.sourceElement,identity.commentKey);
       if(!p.isSub){const wrapper=p.sourceElement.closest(SEL.parentWrapper);if(wrapper)session.sourceKeys.set(wrapper,identity.commentKey);}
       if (p.elementId) session.elementKey.set(p.elementId, identity.commentKey);
-      if (session.keySet.has(identity.commentKey)) continue;
+      if(p.isSub && !parentKey){
+        const pending=session.unresolvedReplies.get(identity.commentKey);
+        // 移除事件的子树已无祖先，不能覆盖进入DOM时保存的真实容器引用。
+        if(!pending || (!pending.parentContainer && p.parentContainer))session.unresolvedReplies.set(identity.commentKey,p);
+      }
+      if (session.keySet.has(identity.commentKey)) {
+        const existing=session.buffer.find(c=>c.commentKey===identity.commentKey)!;
+        if(parentKey && !existing.parentKey){existing.parentKey=parentKey;session.version++;session.unresolvedReplies.delete(identity.commentKey);}
+        continue;
+      }
       session.keySet.add(identity.commentKey);
       session.buffer.push({
         commentKey: identity.commentKey,
         noteKey: session.noteKey,
         platformCommentId: p.platformCommentId,
         parentKey,
+        isReply: p.isSub,
         text,
         authorDisplayName: p.authorDisplayName ? normalizeCommentText(p.authorDisplayName).slice(0, 120) || null : null,
         authorLocalKey: p.authorLocalKey,
@@ -351,6 +373,17 @@ export class XhsSessionManager {
         truncated: p.truncated,
       });
       session.version += 1;
+    }
+    // 只使用已提取时保存的真实 DOM 引用/ID，回复移出 DOM 后也可以补关联。
+    for(const [key,p] of session.unresolvedReplies){
+      const parent=(p.parentElementId?session.elementKey.get(p.parentElementId):undefined)
+        ?? (p.parentElement?session.sourceKeys.get(p.parentElement):undefined)
+        ?? (p.parentContainer?session.sourceKeys.get(p.parentContainer):undefined);
+      if(parent && parent!==key){
+        const comment=session.buffer.find(c=>c.commentKey===key);
+        if(comment){comment.parentKey=parent;session.version++;}
+        session.unresolvedReplies.delete(key);
+      }
     }
     if (session.buffer.length >= LIMITS.maxSessionComments) session.limitReached = true;
   }
