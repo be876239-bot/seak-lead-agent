@@ -22,6 +22,10 @@ export type OnboardingState = {
 export type OnboardingReadiness = {
   modelConfigured: boolean;
   productCount: number;
+  /** True only when a non-empty API Key and model name have been saved. */
+  credentialSaved?: boolean;
+  /** Permission for the selected provider endpoint, not every endpoint offered by the provider. */
+  providerPermissionGranted?: boolean;
 };
 
 const STEP_SET = new Set<string>(ONBOARDING_STEP_ORDER);

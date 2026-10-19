@@ -33,7 +33,7 @@ export const ONBOARDING_STEPS: Record<OnboardingStepId, OnboardingStepDefinition
     location: 'ai-settings',
     target: 'model-save',
     title: '检查 AI 配置',
-    description: '在 AI 服务配置区域填写模型信息、API Key，并按需授权对应服务域名。引导不会显示或额外保存你的 Key。完成后返回这里检查配置。',
+    description: '在设置区域填写 API Key 和模型名称，点击“保存”，再点击“授权模型域名”并允许访问。建议连接测试成功后，返回这里检查配置。引导不会显示或额外保存你的 Key。',
   },
   'add-product': {
     location: 'product-setup',

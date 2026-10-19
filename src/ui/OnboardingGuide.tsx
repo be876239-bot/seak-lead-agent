@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import {
   currentOnboardingStep,
   ONBOARDING_STEP_ORDER,
+  type OnboardingReadiness,
   type OnboardingState,
   type OnboardingStepId,
 } from '../onboarding/flow';
@@ -16,7 +17,7 @@ type Props<TViewId extends string> = {
   onStart: () => void;
   onPause: () => void;
   onResume: () => void;
-  onRefresh: () => Promise<void>;
+  onRefresh: () => Promise<OnboardingReadiness>;
   onNavigate: (viewId: TViewId) => void;
   onComplete: (stepId: OnboardingStepId) => void;
 };
@@ -82,9 +83,33 @@ export default function OnboardingGuide<TViewId extends string,>({
       return;
     }
 
-    if (stepId === 'configure-ai' || stepId === 'add-product') {
-      await onRefresh();
-      setHint('已重新检查当前配置和产品记录。若步骤没有变化，请确认操作是否成功后再检查一次。');
+    if (stepId === 'configure-ai') {
+      try {
+        const readiness = await onRefresh();
+        if (!readiness.credentialSaved) {
+          setHint('还没有检测到已保存的 API Key 和模型名称。请先在设置区域点击“保存”，再回来检查。');
+        } else if (!readiness.providerPermissionGranted) {
+          setHint('配置已保存，但当前 Base URL 对应的模型域名还未授权。请点击“授权模型域名”并允许访问，再回来检查。');
+        } else {
+          setHint('配置已保存且当前模型域名已授权。引导不会验证 Key 是否有效；建议点击“连接测试”确认 API 可用。');
+        }
+      } catch {
+        setHint('检查失败，未更改引导进度。请确认扩展运行正常后重试。');
+      }
+      return;
+    }
+
+    if (stepId === 'add-product') {
+      try {
+        const readiness = await onRefresh();
+        if (readiness.productCount === 0) {
+          setHint('还没有检测到已生成的产品画像。请先在产品页面提交官网链接，等待画像生成成功后再检查。');
+        } else {
+          setHint('已检测到产品记录，正在更新引导进度。');
+        }
+      } catch {
+        setHint('检查产品记录失败，未更改引导进度。请重试。');
+      }
       return;
     }
 

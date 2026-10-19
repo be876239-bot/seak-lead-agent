@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { browser } from 'wxt/browser';
-import { PROVIDER_PRESETS, loadCredential } from '../storage/credentials';
+import { loadCredential, resolveBaseUrl } from '../storage/credentials';
 import { ui } from '../ui/store';
 import {
   completeOnboardingStep,
@@ -18,7 +18,7 @@ export type OnboardingController = {
   state: OnboardingState | null;
   loaded: boolean;
   readiness: OnboardingReadiness;
-  refresh: () => Promise<void>;
+  refresh: () => Promise<OnboardingReadiness>;
   startOrResume: () => Promise<OnboardingState>;
   pause: () => Promise<OnboardingState>;
   completeStep: (stepId: OnboardingStepId) => Promise<OnboardingState | null>;
@@ -61,17 +61,26 @@ export function useOnboardingController(): OnboardingController {
       loadCredential().catch(() => null),
     ]);
 
-    let modelConfigured = false;
-    const preset = credential ? PROVIDER_PRESETS[credential.presetId] : undefined;
-    if (credential?.apiKey.trim() && credential.model.trim() && preset) {
+    const credentialSaved = Boolean(credential?.apiKey.trim() && credential.model.trim());
+    let providerPermissionGranted = false;
+    if (credentialSaved && credential) {
       try {
-        modelConfigured = await browser.permissions.contains({ origins: preset.origins });
+        // Only require the selected endpoint's origin. Requiring every alternate
+        // endpoint caused the guide to block even when the active endpoint was authorized.
+        const activeOrigin = new URL(resolveBaseUrl(credential)).origin + '/*';
+        providerPermissionGranted = await browser.permissions.contains({ origins: [activeOrigin] });
       } catch {
-        modelConfigured = false;
+        providerPermissionGranted = false;
       }
     }
 
-    const nextReadiness = { modelConfigured, productCount: products.length };
+    const modelConfigured = credentialSaved && providerPermissionGranted;
+    const nextReadiness = {
+      modelConfigured,
+      productCount: products.length,
+      credentialSaved,
+      providerPermissionGranted,
+    };
     readinessRef.current = nextReadiness;
     setReadiness(nextReadiness);
 
@@ -81,6 +90,7 @@ export function useOnboardingController(): OnboardingController {
       stateRef.current = saved;
       setState(saved);
     }
+    return nextReadiness;
   }, [persist]);
 
   useEffect(() => {
