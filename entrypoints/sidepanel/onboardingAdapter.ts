@@ -38,6 +38,20 @@ const TARGET_SELECTOR: Record<OnboardingTargetId, string> = {
   'lead-list': '[data-onboarding-target="lead-list"]',
 };
 
+const highlightTimers = new WeakMap<HTMLElement, number>();
+
+function spotlight(target: HTMLElement): void {
+  const previousTimer = highlightTimers.get(target);
+  if (previousTimer !== undefined) window.clearTimeout(previousTimer);
+
+  target.dataset.onboardingHighlighted = 'true';
+  const timer = window.setTimeout(() => {
+    delete target.dataset.onboardingHighlighted;
+    highlightTimers.delete(target);
+  }, 2200);
+  highlightTimers.set(target, timer);
+}
+
 export const sidepanelOnboardingAdapter: OnboardingUIAdapter<SidepanelViewId> = {
   getLocationForView(viewId) {
     return VIEW_LOCATION[viewId] ?? null;
@@ -57,6 +71,7 @@ export const sidepanelOnboardingAdapter: OnboardingUIAdapter<SidepanelViewId> = 
     if (!target) return false;
 
     target.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
+    spotlight(target);
     if (target.matches('button, input, select, textarea, a[href], [tabindex]')) {
       target.focus?.({ preventScroll: true });
     }

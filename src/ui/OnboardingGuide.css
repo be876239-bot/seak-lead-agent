@@ -89,6 +89,15 @@
   outline-offset: 3px;
   border-radius: 8px;
 }
+[data-onboarding-highlighted="true"] {
+  outline: 2px solid var(--sl-primary, #2563eb);
+  outline-offset: 3px;
+  border-radius: 8px;
+  box-shadow: 0 0 0 5px rgba(37, 99, 235, 0.18);
+  position: relative;
+  z-index: 1;
+  transition: outline-color 160ms ease, box-shadow 160ms ease;
+}
 @media (max-width: 360px) {
   .sl-onboarding { padding: 10px; }
   .sl-onboarding__actions button { flex: 1 1 auto; }

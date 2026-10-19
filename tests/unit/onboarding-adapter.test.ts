@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ONBOARDING_STEP_ORDER } from '../../src/onboarding/flow';
 import { ONBOARDING_STEPS } from '../../src/onboarding/catalog';
 import { sidepanelOnboardingAdapter } from '../../entrypoints/sidepanel/onboardingAdapter';
@@ -6,6 +6,10 @@ import { sidepanelOnboardingAdapter } from '../../entrypoints/sidepanel/onboardi
 describe('onboarding catalog and Side Panel adapter contract', () => {
   beforeEach(() => {
     document.body.innerHTML = '';
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it('defines content for every state-machine step', () => {
@@ -39,6 +43,39 @@ describe('onboarding catalog and Side Panel adapter contract', () => {
     expect(sidepanelOnboardingAdapter.focusTarget('discovery-start')).toBe(true);
     expect(target.scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'center' });
     expect(document.activeElement).toBe(target);
+  });
+
+  it('temporarily spotlights a non-focusable target so users can see the relevant section', () => {
+    vi.useFakeTimers();
+    const target = document.createElement('section');
+    target.dataset.onboardingTarget = 'search-keyword';
+    target.scrollIntoView = vi.fn();
+    document.body.append(target);
+
+    expect(sidepanelOnboardingAdapter.focusTarget('search-keyword')).toBe(true);
+    expect(target.scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'center' });
+    expect(target.dataset.onboardingHighlighted).toBe('true');
+
+    vi.advanceTimersByTime(2199);
+    expect(target.dataset.onboardingHighlighted).toBe('true');
+    vi.advanceTimersByTime(1);
+    expect(target.dataset.onboardingHighlighted).toBeUndefined();
+  });
+
+  it('restarts the spotlight timeout when the same target is focused again', () => {
+    vi.useFakeTimers();
+    const target = document.createElement('section');
+    target.dataset.onboardingTarget = 'lead-list';
+    target.scrollIntoView = vi.fn();
+    document.body.append(target);
+
+    sidepanelOnboardingAdapter.focusTarget('lead-list');
+    vi.advanceTimersByTime(1500);
+    sidepanelOnboardingAdapter.focusTarget('lead-list');
+    vi.advanceTimersByTime(1000);
+    expect(target.dataset.onboardingHighlighted).toBe('true');
+    vi.advanceTimersByTime(1200);
+    expect(target.dataset.onboardingHighlighted).toBeUndefined();
   });
 
   it('returns false instead of guessing when a target is missing', () => {
