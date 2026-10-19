@@ -183,3 +183,36 @@ it('恢复采集保留已落库评论，并在滚动前按剩余额度截断写�
   const result=await captureNote(7,{autoLoad:true,wait,initialComments:previous,onDelta:persist});
   expect(result.comments).toHaveLength(LIMITS.maxSessionComments); expect(await db.comments.count()).toBe(10);expect(scroll).not.toHaveBeenCalled();
 });
+
+it('滚动布局延迟1秒就绪：先保存首屏，恢复后继续，未就绪前不滚动',async()=>{
+ const container=document.querySelector<HTMLElement>('.note-scroller')!;
+ Object.defineProperty(container,'clientHeight',{value:0,configurable:true});let samples=0;
+ scroll.mockImplementation(()=>replace(21,40));
+ const result=await captureNote(7,{autoLoad:true,onDelta:persist,wait:async()=>{
+  await wait();samples++;if(samples<=2){expect(scroll).not.toHaveBeenCalled();expect(await db.comments.count()).toBe(20);}
+  if(samples===2){Object.defineProperty(container,'clientHeight',{value:500,configurable:true});}
+ }});
+ expect(result.comments).toHaveLength(40);expect(await db.comments.count()).toBe(40);
+});
+it('可见非滚动列表完全容纳少量评论：不滚动背景，安静后结束',async()=>{
+ const container=document.querySelector<HTMLElement>('.note-scroller')!;container.style.overflowY='visible';
+ const list=document.querySelector<HTMLElement>('.list-container')!;
+ Object.defineProperties(list,{clientHeight:{value:200},scrollHeight:{value:200}});
+ const result=await captureNote(7,{autoLoad:true,wait,onDelta:persist});
+ expect(result.stopReason).toBe('no_new');expect(result.comments).toHaveLength(20);expect(scroll).not.toHaveBeenCalled();
+});
+it('布局始终缺失时有界失败，等待中新增评论仍保存',async()=>{
+ document.querySelector<HTMLElement>('.note-scroller')!.style.overflowY='visible';let waits=0;
+ await expect(captureNote(7,{autoLoad:true,onDelta:persist,wait:async()=>{
+  waits++;if(waits===1)replace(21,40);await wait();
+ }})).rejects.toThrow('评论滚动容器在5秒等待后仍未就绪');
+ expect(waits).toBe(10);expect(scroll).not.toHaveBeenCalled();expect(await db.comments.count()).toBe(40);
+});
+it.each(['cancel','verification','changed'] as const)('布局等待时%s立即停止，不继续滚动',async mode=>{
+ document.querySelector<HTMLElement>('.note-scroller')!.style.overflowY='visible';const ac=new AbortController();let samples=0;
+ await expect(captureNote(7,{autoLoad:true,onDelta:persist,signal:ac.signal,wait:async()=>{
+  samples++;if(mode==='cancel')ac.abort();else if(mode==='verification')document.body.insertAdjacentHTML('beforeend','<div class="login-container">安全验证</div>');else history.replaceState({},'','/explore/bbbbbbbbbbbbbbbbbbbbbbbb');await wait();
+ }})).rejects.toMatchObject({code:mode==='cancel'?'CANCELLED':mode==='verification'?'PAGE_BLOCKED':'PAGE_CHANGED'});
+ expect(samples).toBe(1);expect(scroll).not.toHaveBeenCalled();expect(await db.comments.count()).toBe(20);
+ history.replaceState({},'','/explore/aaaaaaaaaaaaaaaaaaaaaaaa');
+});

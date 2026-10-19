@@ -2,7 +2,6 @@ import { useCallback, useState } from 'react';
 import { browser } from 'wxt/browser';
 import Discovery from './Discovery';
 import Products from './Products';
-import CurrentNote from './CurrentNote';
 import Leads from './Leads';
 import Settings from './Settings';
 import OnboardingGuide from '../../src/ui/OnboardingGuide';
@@ -16,7 +15,6 @@ type Tab = SidepanelViewId;
 const TABS: { id: Tab; label: string }[] = [
   { id: 'products', label: '产品' },
   { id: 'discovery', label: '寻找客户' },
-  { id: 'note', label: '当前笔记' },
   { id: 'leads', label: '线索' },
   { id: 'settings', label: '设置' },
 ];
@@ -86,7 +84,6 @@ export default function App() {
         )}
         {tab === 'settings' && <Settings />}
         {tab === 'products' && <Products />}
-        {tab === 'note' && <CurrentNote />}
         {tab === 'leads' && <Leads />}
       </main>
     </div>

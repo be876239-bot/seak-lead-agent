@@ -202,6 +202,60 @@ export function registerDiscoveryHandlers() {
       return {jobId};
     }finally{starting=false;}
   });
+  registerSensitiveHandler('DISCOVERY_REPROCESS_POST', async req => {
+    if (req.type !== 'DISCOVERY_REPROCESS_POST') throw new Error('类型错误');
+    if (starting) throw new AppError('LOCK_HELD', '另一个任务正在启动，请稍后再试。');
+    starting = true;
+    try {
+      const parent = await analysisRepos.getJob(req.payload.parentJobId);
+      if (!parent?.discovery || !parent.productId) throw new AppError('PAGE_CHANGED', '找不到原批量任务，无法安全重试该帖子。');
+      if (!['completed', 'stopped'].includes(parent.discovery.status)
+        || !['completed', 'partial', 'cancelled', 'interrupted'].includes(parent.status)) {
+        throw new AppError('LOCK_HELD', '请先完成或停止原批量任务，再重新处理其中的帖子。原任务进度会保留。');
+      }
+      const canonicalUrl = noteUrl(req.payload.postUrl);
+      if (!canonicalUrl) throw new AppError('URL_INVALID', '这不是受支持的小红书笔记链接。');
+      const noteKey = noteKeyFromUrl(canonicalUrl);
+      if (!parent.discovery.targets.some(url => noteKeyFromUrl(url) === noteKey)) {
+        throw new AppError('PERMISSION_DENIED', '该笔记不属于所选批量任务，不能从此任务重试。');
+      }
+      const product = await analysisRepos.getProduct(parent.productId);
+      if (!product) throw new AppError('STORAGE_ERROR', '原任务关联的产品已不存在。');
+      if (parent.profileVersion !== product.profileVersion) {
+        throw new AppError('PAGE_CHANGED', '产品画像已更新。为避免新旧画像结果混淆，请使用当前画像重新启动一轮批量搜索。');
+      }
+      const sourceUrl = parent.discovery.navigation?.sourceUrl;
+      if (!sourceUrl) throw new AppError('PAGE_CHANGED', '原任务没有保存可验证的搜索结果页地址，无法安全重新处理。');
+      if (current && current.id !== parent.id && !['completed', 'stopped'].includes(current.task.state.status)) {
+        throw new AppError('LOCK_HELD', '另一个批量任务仍在运行或暂停中。请先结束它，再重试此帖子。');
+      }
+
+      const tabs = await browser.tabs.query({ url: 'https://www.xiaohongshu.com/search_result*' });
+      const matching = tabs.filter(tab => typeof tab.id === 'number' && typeof tab.url === 'string' && sameSearch(tab.url, sourceUrl));
+      if (!matching.length) {
+        throw new AppError('PAGE_CHANGED', '找不到原任务对应的搜索结果页。请先回到原来的小红书搜索结果页，再重试此帖子；已保存的评论和线索不会删除。');
+      }
+      const active = matching.filter(tab => tab.active);
+      const selected = active.length === 1 ? active[0] : matching.length === 1 ? matching[0] : null;
+      if (!selected || typeof selected.id !== 'number') {
+        throw new AppError('PAGE_CHANGED', '找到多个匹配的搜索结果标签页，无法安全选择。请只保留一个原搜索结果页后重试。');
+      }
+
+      await launch({
+        jobId: req.payload.jobId,
+        productId: parent.productId,
+        tabId: selected.id,
+        direction: parent.discovery.direction,
+        urls: [canonicalUrl],
+        sourceUrl,
+        maxPosts: 1,
+      });
+      return { jobId: req.payload.jobId };
+    } finally {
+      starting = false;
+    }
+  });
+
   registerSensitiveHandler('DISCOVERY_CONTROL',async req=>{
     if(req.type!=='DISCOVERY_CONTROL')throw new Error('类型错误');
     if(current?.id===req.payload.jobId)current.task.recordControl(req.payload.action);

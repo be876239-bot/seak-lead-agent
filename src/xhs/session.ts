@@ -223,10 +223,12 @@ export class XhsSessionManager {
   private scrollContainer():HTMLElement|null {
     const doc = this.getDoc();
     const root = doc.querySelector(SEL.noteRoot);
-    let el = doc.querySelector<HTMLElement>(SEL.listContainer);
+    const list=doc.querySelector<HTMLElement>(SEL.listContainer);
+    let el = list;
     let shortList: HTMLElement | null = null;
     while (el && root?.contains(el)) {
       const style = doc.defaultView?.getComputedStyle(el);
+      if(style?.display==='none'||style?.visibility==='hidden')return null;
       if (/(auto|scroll)/.test(style?.overflowY || style?.overflow || '') && el.clientHeight > 0) {
         shortList ??= el;
         if (el.scrollHeight > el.clientHeight) {
@@ -235,12 +237,17 @@ export class XhsSessionManager {
       }
       el = el.parentElement;
     }
-    return shortList;
+    if(shortList)return shortList;
+    // 已显示且内容完全容纳于列表内，无须强行寻找/滚动背后的信息流。
+    if(list && root?.contains(list) && list.clientHeight>0 && list.scrollHeight<=list.clientHeight
+      && list.querySelector(`${SEL.commentItem},${SEL.subCommentItem}`))return list;
+    return null;
   }
   /** 只滚动已确认评论列表在当前笔记内的可滚动祖先，不访问接口。 */
   private scrollComments(): void {
     const el=this.scrollContainer();
     if(!el)throw new AppError('PARSE_FAILED', '无法确认当前笔记的评论滚动容器；已停止，已保存评论保留');
+    if(el.scrollHeight<=el.clientHeight)return;
     el.scrollBy({top:Math.max(1,Math.min(400,el.clientHeight/3)),behavior:'instant'});
   }
 

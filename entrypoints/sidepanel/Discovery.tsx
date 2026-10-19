@@ -1,4 +1,5 @@
 import CollectionProgressView from '../../src/ui/CollectionProgress';
+import DiscoveryPostResults from './DiscoveryPostResults';
 import ErrorNotice from '../../src/ui/ErrorNotice';
 import { useEffect, useState } from 'react';
 import { browser } from 'wxt/browser';
@@ -11,9 +12,27 @@ import { getSelectedProductId, ui } from '../../src/ui/store';
 import { copyTextToClipboard } from '../../src/ui/clipboard';
 import { isValidMaxPostsInput } from '../../src/ui/discovery-input';
 import { isBackgroundInterruptedDiscovery, isDiscoveryTaskBlockingStart } from '../../src/discovery/task-state';
+import { noteKeyFromUrl } from '../../src/xhs/discovery-dom';
 
 const LAST='discovery.lastJobId';
+const REPROCESS_LAST='discovery.reprocessJobId';
 type DiscoveryProps = { onSearchConfirmed?: () => void; onTaskStarted?: () => void };
+
+function DiscoveryPostSummary({ noteKey }: { noteKey: string }) {
+  const [summary, setSummary] = useState<{ title: string | null; bodyExcerpt: string | null; commentCount: number } | null>(null);
+  useEffect(() => {
+    let active = true;
+    void Promise.all([ui.getNote(noteKey), ui.commentsForNote(noteKey)]).then(([note, comments]) => {
+      if (active) setSummary({ title: note?.title ?? null, bodyExcerpt: note?.bodyExcerpt ?? null, commentCount: comments.length });
+    }).catch(() => {});
+    return () => { active = false; };
+  }, [noteKey]);
+  return <div className="sl-discovery-results__summary-text">
+    <b>{summary?.title || summary?.bodyExcerpt || noteKey}</b>
+    {summary?.title && summary.bodyExcerpt && <span>{summary.bodyExcerpt}</span>}
+    {summary && <span className="sl-page-footnote">本地已保存 {summary.commentCount} 条评论</span>}
+  </div>;
+}
 
 export default function Discovery({ onSearchConfirmed, onTaskStarted }: DiscoveryProps) {
   const [products,setProducts]=useState<Product[]>([]);
@@ -25,16 +44,25 @@ export default function Discovery({ onSearchConfirmed, onTaskStarted }: Discover
   const [error,setError]=useState('');const [sending,setSending]=useState(false);
   const [searchConfirmed,setSearchConfirmed]=useState(false);
   const [copyFeedback,setCopyFeedback]=useState('');
+  const [expandedPostKey,setExpandedPostKey]=useState<string|null>(null);
+  const [reprocessJob,setReprocessJob]=useState<Job|null>(null);
+  const [postResultsRefreshKey,setPostResultsRefreshKey]=useState(0);
   const product=products.find(p=>p.id===productId);
+  const resultProduct=products.find(p=>p.id===job?.productId)??null;
   const state=job?.discovery;
   const backgroundInterrupted=isBackgroundInterruptedDiscovery(job);
   // Only a running task blocks a new task; a paused checkpoint remains saved and resumable.
   const blockingStart=isDiscoveryTaskBlockingStart(job);
+  const reprocessActive=!!reprocessJob && !['completed','stopped'].includes(reprocessJob.discovery?.status??'');
   useEffect(()=>{void (async()=>{
     const list=await ui.listProducts();setProducts(list);const selected=await getSelectedProductId();
     setProductId(list.find(p=>p.id===selected)?.id??list[0]?.id??'');
-    const saved=await browser.storage.local.get(LAST);if(typeof saved[LAST]==='string') {
+    const saved=await browser.storage.local.get([LAST,REPROCESS_LAST]);
+    if(typeof saved[LAST]==='string') {
       const res=await sendRequest<{job:Job|null}>('JOB_GET',{jobId:saved[LAST]});setJob(res.job);
+    }
+    if(typeof saved[REPROCESS_LAST]==='string') {
+      const res=await sendRequest<{job:Job|null}>('JOB_GET',{jobId:saved[REPROCESS_LAST]});setReprocessJob(res.job);
     }
   })().catch(e=>setError(toErrorPayload(e).message));},[]);
   useEffect(()=>{setDirection(product?.profile.searchSuggestions[0]??'');setSearchConfirmed(false);setCopyFeedback('');},[product]);
@@ -43,6 +71,14 @@ export default function Discovery({ onSearchConfirmed, onTaskStarted }: Discover
     const timer=window.setInterval(()=>{void sendRequest<{job:Job|null}>('JOB_GET',{jobId:id}).then(res=>setJob(res.job)).catch(e=>setError(toErrorPayload(e).message));},1000);
     return ()=>window.clearInterval(timer);
   },[job?.id,job?.discovery?.status]);
+  useEffect(()=>{
+    if(!reprocessJob || ['completed','stopped'].includes(reprocessJob.discovery?.status??''))return;const id=reprocessJob.id;
+    const timer=window.setInterval(()=>{void sendRequest<{job:Job|null}>('JOB_GET',{jobId:id}).then(res=>setReprocessJob(res.job)).catch(e=>setError(toErrorPayload(e).message));},1000);
+    return ()=>window.clearInterval(timer);
+  },[reprocessJob?.id,reprocessJob?.discovery?.status]);
+  useEffect(()=>{
+    if(reprocessJob && ['completed','stopped'].includes(reprocessJob.discovery?.status??''))setPostResultsRefreshKey(key=>key+1);
+  },[reprocessJob?.discovery?.status]);
   const copyCurrentDirection=async()=>{
     setCopyFeedback('');
     setSearchConfirmed(false);
@@ -52,6 +88,7 @@ export default function Discovery({ onSearchConfirmed, onTaskStarted }: Discover
   };
   const start=async()=>{
     setError('');
+    if(reprocessActive){setError('本帖重新采集任务仍在运行，请先完成、暂停或停止它。');return;}
     if(!isValidMaxPostsInput(maxPostsInput)){setError('帖子数量上限必须是 1–100 之间的整数。');return;}
     if(!searchConfirmed){setError('请先在小红书搜索框中搜索当前关键词，确认结果页已加载后勾选确认。');return;}
     setSending(true);
@@ -63,6 +100,9 @@ export default function Discovery({ onSearchConfirmed, onTaskStarted }: Discover
       await sendRequest('DISCOVERY_START',{jobId,productId,tabId:tab.id,direction,maxPosts:Number(maxPostsInput)});
       onTaskStarted?.();
       await browser.storage.local.set({[LAST]:jobId});
+      await browser.storage.local.remove(REPROCESS_LAST);
+      setReprocessJob(null);
+      setExpandedPostKey(null);
       setJob((await sendRequest<{job:Job|null}>('JOB_GET',{jobId})).job);
     }catch(e){setError(e instanceof Error?e.message:'任务启动失败');}finally{setSending(false);}
   };
@@ -71,6 +111,63 @@ export default function Discovery({ onSearchConfirmed, onTaskStarted }: Discover
     try {await sendRequest('DISCOVERY_CONTROL',{jobId:job.id,action});setJob((await sendRequest<{job:Job|null}>('JOB_GET',{jobId:job.id})).job);}
     catch(e){setError(toErrorPayload(e).message);if(action==='stop')setJob(null);}finally{setSending(false);}
   };
+  const controlReprocess=async(action:'pause'|'stop'|'continue')=>{
+    if(!reprocessJob)return;setSending(true);setError('');
+    try {await sendRequest('DISCOVERY_CONTROL',{jobId:reprocessJob.id,action});setReprocessJob((await sendRequest<{job:Job|null}>('JOB_GET',{jobId:reprocessJob.id})).job);}
+    catch(e){setError(toErrorPayload(e).message);}finally{setSending(false);}
+  };
+  const reprocessPost=async(postUrl:string)=>{
+    if(!job?.id||!state)return;
+    if(!['completed','stopped'].includes(state.status)){setError('请先完成或停止当前批量任务，再重新处理其中的帖子。原任务进度会保留。');return;}
+    if(reprocessActive){setError('另一个本帖重新采集任务仍在运行。');return;}
+    setSending(true);setError('');
+    try {
+      const jobId=crypto.randomUUID();
+      await sendRequest('DISCOVERY_REPROCESS_POST',{jobId,parentJobId:job.id,postUrl});
+      await browser.storage.local.set({[REPROCESS_LAST]:jobId});
+      setReprocessJob((await sendRequest<{job:Job|null}>('JOB_GET',{jobId})).job);
+      setExpandedPostKey(noteKeyFromUrl(postUrl));
+    } catch(e) { setError(toErrorPayload(e).message); }
+    finally { setSending(false); }
+  };
+  const retryFailed=async(jobId:string)=>{
+    setSending(true);setError('');
+    try {
+      const before=(await sendRequest<{job:Job|null}>('JOB_GET',{jobId})).job?.status;
+      await sendRequest('JOB_RETRY',{jobId});
+      // JOB_RETRY is asynchronous. Wait for a persisted state transition where possible,
+      // so the detail panel does not immediately redisplay the old failed state.
+      for(let attempt=0;attempt<8;attempt++){
+        await new Promise(resolve=>window.setTimeout(resolve,400));
+        const res=await sendRequest<{job:Job|null}>('JOB_GET',{jobId});
+        if(res.job && res.job.status!==before)break;
+      }
+      setPostResultsRefreshKey(key=>key+1);
+    } catch(e) { setError(toErrorPayload(e).message); }
+    finally { setSending(false); }
+  };
+  const controlPostTask=(action:'pause'|'stop'|'continue')=>{
+    if(reprocessActive)void controlReprocess(action);
+    else void control(action);
+  };
+  const detailTaskControl = reprocessActive && reprocessJob?.discovery
+    ? {scope:'post' as const,status:reprocessJob.discovery.status as 'running'|'paused'}
+    : state && (state.status==='running'||state.status==='paused')
+      ? {scope:'batch' as const,status:state.status}
+      : null;
+  const postEntries=(state?.targets??[]).map((postUrl,index)=>{
+    let noteKey:string|null=null;
+    try { noteKey=noteKeyFromUrl(postUrl); } catch { /* invalid historical URL is omitted rather than guessed */ }
+    if(!noteKey)return null;
+    const terminalTrace=[...(state?.trace??[])].reverse().find(row=>row.postIndex===index&&(row.event==='POST_COMPLETE'||row.event==='POST_PARTIAL'));
+    const completed=(state?.completedNoteKeys??[]).includes(noteKey)||index<(state?.index??0)||(index===state?.index&&['completed','partial'].includes(state?.post?.stage??''));
+    let postStatus:'completed'|'partial'|'running'|'paused'|'pending'='pending';
+    if(index===state?.index&&state?.status==='running'&&!completed)postStatus='running';
+    else if(index===state?.index&&state?.status==='paused'&&!completed)postStatus='paused';
+    else if(completed)postStatus=terminalTrace?.event==='POST_PARTIAL'||(index===state?.index&&state?.post?.stage==='partial')?'partial':'completed';
+    return {postUrl,noteKey,index,status:postStatus};
+  }).filter((entry):entry is NonNullable<typeof entry>=>entry!==null);
+  const postActionBusy=sending||reprocessActive||state?.status==='running'||state?.status==='paused';
   return <section className="sl-page sl-discovery-page">
     <h2>寻找客户</h2>
     <p className="sl-page-intro">先选择产品和搜索方向，在已登录的小红书网页中手动搜索。插件只处理当前已加载的搜索结果卡片，不会自动搜索或扩展结果；实际处理数量可能少于所选上限。任务运行时请勿手动切换小红书标签页。</p>
@@ -113,6 +210,58 @@ export default function Discovery({ onSearchConfirmed, onTaskStarted }: Discover
         <button disabled={sending} onClick={()=>void control('stop')}>停止任务</button>
       </div>}
     </div>}
+    {reprocessJob?.discovery && (
+      <div className="sl-card sl-reprocess-task" aria-live="polite">
+        <b>本帖重新采集任务</b>
+        <p>状态：{reprocessJob.discovery.status==='running'?'处理中':reprocessJob.discovery.status==='paused'?'已暂停':reprocessJob.discovery.status==='completed'?(reprocessJob.status==='partial'?'部分完成':'已完成'):'已停止'}</p>
+        <p>进度：{reprocessJob.completedItems}/{reprocessJob.discovery.total} 篇 · {reprocessJob.discovery.phase}</p>
+        {reprocessJob.discovery.reason && <ErrorNotice message={reprocessJob.discovery.reason} tone="warning" />}
+        {reprocessJob.discovery.status==='running' && <button disabled={sending} onClick={()=>void controlReprocess('pause')}>暂停本帖任务</button>}
+        {reprocessJob.discovery.status==='paused' && <div className="sl-discovery-post-results__actions">
+          <button disabled={sending} onClick={()=>void controlReprocess('continue')}>继续本帖任务</button>
+          <button disabled={sending} onClick={()=>void controlReprocess('stop')}>停止本帖任务</button>
+        </div>}
+        {reprocessJob.discovery.status==='completed' && <p className="sl-page-footnote">已完成。原批量任务的历史检查点未被覆盖，下面的本帖结果会自动刷新。</p>}
+      </div>
+    )}
+    {postEntries.length>0 && resultProduct && (
+      <section className="sl-card sl-discovery-results" aria-label="批量帖子结果">
+        <h3>本次帖子结果（{postEntries.filter(p=>p.status==='completed'||p.status==='partial').length}/{postEntries.length} 已处理）</h3>
+        <p className="sl-page-footnote">展开任意帖子，可查看单篇评论、证据、模型判断、人工处理状态、任务日志，并在必要时重新采集或重试失败的 AI 批次。所有操作仍属于同一个批量搜索工作流。</p>
+        <div className="sl-discovery-results__list">
+          {postEntries.map((post)=>(
+            <article className="sl-discovery-results__item" key={post.noteKey}>
+              <div className="sl-discovery-results__row">
+                <div className="sl-discovery-results__meta">
+                  <b>第 {post.index+1} 篇</b>
+                  <span className={`sl-post-status sl-post-status--${post.status}`}>{post.status==='completed'?'已完成':post.status==='partial'?'部分采集':post.status==='running'?'处理中':post.status==='paused'?'已暂停':'待处理'}</span>
+                  <DiscoveryPostSummary noteKey={post.noteKey} />
+                </div>
+                <div className="sl-discovery-results__controls">
+                  <a href={post.postUrl} target="_blank" rel="noreferrer">打开笔记</a>
+                  <button type="button" onClick={()=>setExpandedPostKey(key=>key===post.noteKey?null:post.noteKey)}>{expandedPostKey===post.noteKey?'收起详情':'查看详情'}</button>
+                </div>
+              </div>
+              {expandedPostKey===post.noteKey && (
+                <DiscoveryPostResults
+                  product={resultProduct}
+                  noteKey={post.noteKey}
+                  postUrl={post.postUrl}
+                  status={post.status}
+                  onRetryFailed={retryFailed}
+                  onReprocess={reprocessPost}
+                  onTaskControl={controlPostTask}
+                  taskControl={detailTaskControl}
+                  controlBusy={sending}
+                  busy={postActionBusy}
+                  refreshKey={postResultsRefreshKey}
+                />
+              )}
+            </article>
+          ))}
+        </div>
+      </section>
+    )}
     {error && <ErrorNotice message={error} tone="error" />}
     <p className="sl-page-footnote">遇验证码、登录或风控会暂停，不自动刷新或绕过。采用只读、单页串行、有限任务、人工可暂停设计；这不能保证平台不会采取账号限制措施。</p>
   </section>;

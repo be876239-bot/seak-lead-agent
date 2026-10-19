@@ -231,6 +231,14 @@ export class Repositories {
     return this.db.comments.where('noteKey').equals(noteKey).toArray();
   }
 
+  /** Note-level job history for the unified batch workflow. Jobs remain local and are filtered by both note and product. */
+  async jobsForNote(noteKey: string, productId: string): Promise<Job[]> {
+    const rows = await this.db.jobs.toArray();
+    return rows
+      .filter((job) => job.kind === 'comments' && job.noteKey === noteKey && job.productId === productId)
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  }
+
   async analysesFor(productId: string, commentKeys: readonly string[]): Promise<Analysis[]> {
     if (!commentKeys.length) return [];
     return this.db.analyses.where('[productId+commentKey]')

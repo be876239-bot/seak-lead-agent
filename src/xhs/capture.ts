@@ -180,14 +180,26 @@ export async function captureNote(tabId: number, options: CaptureOptions = {}): 
         }), signal,budget.snapshot().durationMs-budget.snapshot().elapsedMs));
       }catch(err) {
         if(err instanceof AppError && err.code==='PARSE_FAILED' && err.message.startsWith('页面采集请求超时') && budget.stopReason()==='time_limit')throw new CaptureBudgetStop('time_limit');
-        // Only the two known missing-container errors can mean a temporary DOM rebuild.
+        const missingScroll=err instanceof AppError && err.message==='无法确认当前笔记的评论滚动容器；已停止，已保存评论保留';
+        // Only known missing-list/layout errors get bounded readiness sampling.
         // Every retry still validates the same session/note and platform guards.
         if(!options.autoLoad || !(err instanceof AppError) || err.code!=='PARSE_FAILED' ||
-          !['未找到评论列表容器','未找到评论容器，页面可能未加载完成或结构已变化'].includes(err.message))throw err;
-        if(sample>=LIMITS.captureListWaitSamples)throw new AppError('PARSE_FAILED',`评论列表在5秒等待后仍未恢复；已保存 ${found.size} 条评论，请人工检查后继续`);
-        advance=false; // The failed request may already have scrolled. Never scroll again while waiting.
+          !['未找到评论列表容器','未找到评论容器，页面可能未加载完成或结构已变化','无法确认当前笔记的评论滚动容器；已停止，已保存评论保留'].includes(err.message))throw err;
+        if(sample>=LIMITS.captureListWaitSamples)throw new AppError('PARSE_FAILED',`${missingScroll?'评论滚动容器在5秒等待后仍未就绪':'评论列表在5秒等待后仍未恢复'}；已保存 ${found.size} 条评论，请人工检查后继续`);
+        // 此精确错误在任何滚动前抛出；可安全重试推进。列表异常仍禁止补滚。
+        advance=missingScroll;
         await report(true);
-        await (options.wait??waitForLoad)(LIMITS.capturePollMs,signal);
+        await (options.wait??waitForLoad)(Math.min(LIMITS.capturePollMs,Math.max(0,budget.snapshot().durationMs-budget.snapshot().elapsedMs)),signal);
+        if(missingScroll){
+          checkCancelled(signal);
+          if(budget.stopReason()==='time_limit')throw new CaptureBudgetStop('time_limit');
+          // 等待布局期间也提取并保存已出现的内容，避免虚拟列表移除后丢失。
+          const page=SnapshotPayload.parse(await ask(tabId,buildRequest('XHS_GET_SNAPSHOT',{
+            sessionId:first!.sessionId,expectedNoteKey,cursor:null,
+          }),signal,budget.snapshot().durationMs-budget.snapshot().elapsedMs));
+          await drain(page);
+          if(endOfList||truncated)return {...page,nextCursor:null};
+        }
       }
     }
   };

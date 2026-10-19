@@ -7,7 +7,7 @@ export const PROTOCOL_VERSION = 1;
 
 export const MessageType = z.enum([
   'XHS_CLICK_NOTE', 'XHS_CLOSE_NOTE', 'XHS_SEARCH_STATE', 'XHS_SCROLL_SEARCH',
-  'XHS_DISCOVER', 'XHS_GUARD', 'DISCOVERY_START', 'DISCOVERY_CONTROL',
+  'XHS_DISCOVER', 'XHS_GUARD', 'DISCOVERY_START', 'DISCOVERY_CONTROL', 'DISCOVERY_REPROCESS_POST',
   'XHS_GET_STATUS',
   'XHS_START_SESSION',
   'XHS_GET_SNAPSHOT',
@@ -32,6 +32,7 @@ export const RequestSchema = z.discriminatedUnion('type', [
   z.object({ protocol:z.literal(PROTOCOL_VERSION), requestId:RequestId, type:z.literal('XHS_DISCOVER'), payload:z.object({maxPosts:z.number().int().min(1).max(100).default(5)}) }),
   z.object({ protocol:z.literal(PROTOCOL_VERSION), requestId:RequestId, type:z.literal('XHS_GUARD'), payload:z.object({}) }),
   z.object({protocol:z.literal(PROTOCOL_VERSION),requestId:RequestId,type:z.literal('DISCOVERY_START'),payload:z.object({jobId:z.string().uuid(),productId:z.string().uuid(),tabId:z.number().int().nonnegative(),direction:z.string().min(1).max(200),maxPosts:z.number().int().min(1).max(100).default(20)})}),
+  z.object({protocol:z.literal(PROTOCOL_VERSION),requestId:RequestId,type:z.literal('DISCOVERY_REPROCESS_POST'),payload:z.object({jobId:z.string().uuid(),parentJobId:z.string().uuid(),postUrl:z.string().url().max(LIMITS.maxUrlChars)})}),
   z.object({protocol:z.literal(PROTOCOL_VERSION),requestId:RequestId,type:z.literal('DISCOVERY_CONTROL'),payload:z.object({jobId:z.string().uuid(),action:z.enum(['pause','stop','continue'])})}),
   z.object({ protocol: z.literal(PROTOCOL_VERSION), requestId: RequestId, type: z.literal('XHS_GET_STATUS'), payload: z.object({}) }),
   z.object({

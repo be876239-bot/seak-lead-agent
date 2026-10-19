@@ -31,7 +31,6 @@ describe('onboarding catalog and Side Panel adapter contract', () => {
     expect(sidepanelOnboardingAdapter.getLocationForView('products')).toBe('product-setup');
     expect(sidepanelOnboardingAdapter.getLocationForView('discovery')).toBe('search-workflow');
     expect(sidepanelOnboardingAdapter.getLocationForView('leads')).toBe('lead-review');
-    expect(sidepanelOnboardingAdapter.getLocationForView('note')).toBeNull();
   });
 
   it('locates a semantic target without depending on its CSS class or visual layout', () => {

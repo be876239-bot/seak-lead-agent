@@ -1,7 +1,7 @@
 import type { OnboardingLocationId, OnboardingTargetId } from '../../src/onboarding/catalog';
 import type { OnboardingUIAdapter } from '../../src/onboarding/uiAdapter';
 
-export type SidepanelViewId = 'discovery' | 'products' | 'note' | 'leads' | 'settings';
+export type SidepanelViewId = 'discovery' | 'products' | 'leads' | 'settings';
 
 const VIEW_LOCATION: Partial<Record<SidepanelViewId, OnboardingLocationId>> = {
   settings: 'ai-settings',
