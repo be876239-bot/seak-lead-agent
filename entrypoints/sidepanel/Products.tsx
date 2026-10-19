@@ -59,7 +59,7 @@ function ProfileView({ product }: { product: Product }) {
   };
 
   return (
-    <div style={{ display: 'grid', gap: 6, fontSize: 12 }}>
+    <div className="sl-profile" style={{ display: 'grid', gap: 6, fontSize: 12 }}>
       {unknowns.includes('类别') && (
         <p style={{ background: '#fff7e6', border: '1px solid #ffd591', padding: 6, margin: 0 }}>
           类别未知：画像完整度较低。可以照常分析评论，但不会根据猜测补充结论。
@@ -244,9 +244,9 @@ export default function Products() {
     ? products.find((p) => urlKey(p.inputUrl) === key || urlKey(p.finalUrl) === key)
     : undefined;
   return (
-    <div className="sl-page" style={{ display: 'grid', gap: 10, fontSize: 13 }}>
+    <div className="sl-page sl-products-page" style={{ display: 'grid', gap: 10, fontSize: 13 }}>
       <h2>产品</h2>
-      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'stretch' }}>
+      <div className="sl-product-create" style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'stretch' }}>
         <input
           value={url}
           onChange={(e) => setUrl(e.target.value)}
@@ -267,7 +267,7 @@ export default function Products() {
       {error && <ErrorNotice message={error} tone="error" />}
       {info && <p style={{ color: '#0a7', margin: 0 }}>{info}</p>}
       {match && (
-        <div className="sl-notice sl-notice--info" style={{ fontSize: 12 }}>
+        <div className="sl-notice sl-notice--info sl-product-match" style={{ fontSize: 12 }}>
           这个链接已识别过：{match.profile.name.value ?? hostOf(match.inputUrl)}（画像 v{match.profileVersion}，{match.updatedAt.slice(0, 16).replace('T', ' ')} 更新）。
           <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
             <button onClick={() => void reuse(match)}>直接复用（不调用模型）</button>
@@ -280,7 +280,7 @@ export default function Products() {
       {products.map((p) => {
         const name = p.profile.name.value ?? p.inputUrl;
         return (
-          <div key={p.id} className="sl-card" style={{ display: 'grid', gap: 8 }}>
+          <div key={p.id} className="sl-card sl-product-card" style={{ display: 'grid', gap: 8 }}>
             <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
               <label style={{ display: 'flex', gap: 4, alignItems: 'center', flex: 1 }}>
                 <input
@@ -307,7 +307,7 @@ export default function Products() {
         );
       })}
       {products.length > 0 && (
-        <section style={{ display: 'grid', gap: 4, borderTop: '1px solid #eee', paddingTop: 8 }}>
+        <section className="sl-history" style={{ display: 'grid', gap: 4, borderTop: '1px solid #eee', paddingTop: 8 }}>
           <b style={{ fontSize: 12 }}>历史记录（最近 5 条）</b>
           {[...products]
             .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))

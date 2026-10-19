@@ -46,3 +46,34 @@
 6. 在“线索”页确认原线索和人工处理状态仍在；在“设置”页确认 Key、模型设置、保留期和用量展示仍正常。
 
 本轮未创建 Git commit 或 push；所有既有未提交改动均需保留。
+
+
+## Phase 1 implementation update — 2026-10-19
+
+### What changed
+
+- Added a page-level visual hierarchy for the narrow Edge side panel: clearer intro copy, keyword-search step heading, post-limit control, collection-safety note, task status card, and concise footer safety note.
+- Added page-specific styling hooks for product creation/history/profile cards, lead filters/cards, current-note actions, and settings sections.
+- Unified spacing and presentation for error notices and collection progress, including clearer boundaries and more legible status text.
+- Added narrow-panel wrapping rules for product cards, lead filters, note toolbar, and action buttons.
+- No new dependency, network request, storage schema, permissions, or business-flow changes.
+
+### Verification after this UI pass
+
+- \`npm run typecheck\`: passed.
+- \`npm run lint\`: passed.
+- \`npm test\`: 39 test files passed; no failing test files.
+- \`npm run build:edge\`: passed.
+- \`npm run zip:edge\`: passed; \`.output/seeklead-agent-0.1.0-edge.zip\` generated (382,665 bytes).
+- \`git diff --check\`: passed, with existing Windows LF→CRLF advisory warnings only.
+- Actual visual acceptance in Edge: **pending**. The code/build/tests do not prove the rendered side panel looks correct at the user's actual width.
+
+### User acceptance checklist
+
+1. Reload the unpacked extension from \`.output/edge-mv3\` at \`edge://extensions\`.
+2. Check all five tabs at normal side-panel width and a narrow width.
+3. In “寻找客户”, verify the keyword copy, search confirmation, 1–100 post limit, start/pause/continue/stop actions, and task history remain functional.
+4. In “产品”, verify URL entry, duplicate product reuse/re-identification, profile details, search keyword copy, history, and delete confirmation.
+5. In “当前笔记” and “线索”, verify existing records and manual handled/correction states remain intact.
+6. In “设置”, verify model/Key, domain permission, usage, retention, and business-data clearing sections remain usable.
+7. Do not commit or push this UI pass until the user has reviewed it or explicitly asks to submit.

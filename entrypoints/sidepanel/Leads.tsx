@@ -119,9 +119,9 @@ export default function Leads() {
   );
 
   return (
-    <div className="sl-page" style={{ display: 'grid', gap: 10, fontSize: 13 }}>
+    <div className="sl-page sl-leads-page" style={{ display: 'grid', gap: 10, fontSize: 13 }}>
       <h2>线索</h2>
-      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+      <div className="sl-lead-filters" style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
         <select value={productId ?? ''} onChange={(e) => setProductId(e.target.value || null)}>
           {products.length === 0 && <option value="">（尚无产品）</option>}
           {products.map((p) => <option key={p.id} value={p.id}>{p.profile.name.value ?? p.inputUrl}</option>)}
@@ -138,7 +138,7 @@ export default function Leads() {
         <input value={filters.query} placeholder="搜索评论/需求摘要"
           onChange={(e) => setFilters((f) => ({ ...f, query: e.target.value }))} style={{ flex: 1, minWidth: 120 }} />
       </div>
-      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+      <div className="sl-lead-actions" style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
         <button onClick={exportJson} disabled={!shown.length}>导出当前筛选 JSON</button>
         <button onClick={exportCsv} disabled={!shown.length}>导出当前筛选 CSV</button>
         <span style={{ color: '#888', fontSize: 12 }}>本地下载，共 {shown.length} 条；不含 Key 与原始未打码内容</span>
@@ -155,8 +155,8 @@ export default function Leads() {
         const note = notes[v.comment.noteKey];
         const stale = current && v.analysis.profileVersion !== current.profileVersion;
         return (
-          <div key={v.analysis.id} className="sl-card" style={{ display: 'grid', gap: 6 }}>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12, color: '#777' }}>
+          <div key={v.analysis.id} className="sl-card sl-lead-card" style={{ display: 'grid', gap: 6 }}>
+            <div className="sl-lead-meta" style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12, color: '#777' }}>
               <span style={{ background: '#f3f3f3', borderRadius: 4, padding: '0 6px' }}>{GROUP_TITLES[v.group]}</span>
               <span>{v.source === 'human' ? `人工纠正（模型原判：${GROUP_TITLES[v.modelGroup]}）` : '模型结果'}</span>
               {stale && <span style={{ color: '#b60' }}>画像 v{v.analysis.profileVersion}（当前 v{current!.profileVersion}）</span>}

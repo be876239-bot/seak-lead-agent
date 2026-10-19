@@ -12,7 +12,7 @@ export default function ErrorNotice({ message, code, tone = 'error' }: {
   const background = tone === 'warning' ? '#fff9e8' : '#fff5f4';
 
   return (
-    <div role={tone === 'warning' ? 'status' : 'alert'} aria-live="polite" style={{
+    <div className="sl-error-notice" role={tone === 'warning' ? 'status' : 'alert'} aria-live="polite" style={{
       border: `1px solid ${border}`, borderRadius: 6, padding: 10,
       background, color: '#242424', fontSize: 12, lineHeight: 1.5,
     }}>

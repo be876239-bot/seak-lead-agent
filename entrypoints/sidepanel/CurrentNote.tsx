@@ -202,9 +202,9 @@ export default function CurrentNote() {
   const analyzeLabel = job?.noteKey && groups ? '继续采集评论并分析新增' : '开始采集评论（完成后分析）';
 
   return (
-    <div className="sl-page" style={{ display: 'grid', gap: 10, fontSize: 13 }}>
+    <div className="sl-page sl-note-page" style={{ display: 'grid', gap: 10, fontSize: 13 }}>
       <h2>当前笔记</h2>
-      <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+      <div className="sl-note-toolbar" style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
         <span>当前产品：</span>
         <select value={productId ?? ''} onChange={(e) => setProductId(e.target.value || null)} disabled={busy}>
           {products.length === 0 && <option value="">（尚无产品，请先到“产品”页创建）</option>}
@@ -227,7 +227,7 @@ export default function CurrentNote() {
         </p>
       )}
 
-      <div style={{ display: 'flex', gap: 6 }}>
+      <div className="sl-note-actions" style={{ display: 'flex', gap: 6 }}>
         <button className="sl-button--primary" onClick={() => void analyze()} disabled={busy || !productId || !status?.supported || status.blocked}>
           {analyzeLabel}
         </button>

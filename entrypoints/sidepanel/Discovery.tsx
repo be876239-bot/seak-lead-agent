@@ -68,12 +68,12 @@ export default function Discovery() {
     try {await sendRequest('DISCOVERY_CONTROL',{jobId:job.id,action});setJob((await sendRequest<{job:Job|null}>('JOB_GET',{jobId:job.id})).job);}
     catch(e){setError(toErrorPayload(e).message);if(action==='stop')setJob(null);}finally{setSending(false);}
   };
-  return <section className="sl-page">
+  return <section className="sl-page sl-discovery-page">
     <h2>寻找客户</h2>
-    <p>先选择新任务的产品和搜索方向，在已登录的小红书网页中完成搜索。只读取当前已加载的搜索结果卡片，不自动滚动或扩展搜索；实际处理数量可能少于所选上限。任务会在当前搜索标签内依次打开帖子并正常后退，运行时请勿手动切换该页。若上次任务还在运行，启动新任务会先自动暂停上次任务并保留进度与历史线索。</p>
-    <label>新任务产品：<select value={productId} onChange={e=>{setProductId(e.target.value);setSearchConfirmed(false);setCopyFeedback('');}}>{products.map(p=><option key={p.id} value={p.id}>{p.profile.name.value??'未命名产品'}</option>)}</select></label>
-    <div className="sl-notice sl-notice--info" style={{display:'grid',gap:6,marginTop:8}}>
-      <b>第 1 步：复制并搜索关键词</b>
+    <p className="sl-page-intro">先选择产品和搜索方向，在已登录的小红书网页中手动搜索。插件只处理当前已加载的搜索结果卡片，不会自动搜索或扩展结果；实际处理数量可能少于所选上限。任务运行时请勿手动切换小红书标签页。</p>
+    <label className="sl-field">新任务产品：<select value={productId} onChange={e=>{setProductId(e.target.value);setSearchConfirmed(false);setCopyFeedback('');}}>{products.map(p=><option key={p.id} value={p.id}>{p.profile.name.value??'未命名产品'}</option>)}</select></label>
+    <div className="sl-notice sl-notice--info sl-step-card" style={{display:'grid',gap:6,marginTop:8}}>
+      <b className="sl-step-title"><span className="sl-step-number">1</span>复制并搜索关键词</b>
       <div style={{display:'flex',gap:6,alignItems:'center',flexWrap:'wrap'}}>
         <label style={{display:'grid',gap:4,flex:1,minWidth:160}}>本次搜索关键词/分析方向：<select value={direction} onChange={e=>{setDirection(e.target.value);setSearchConfirmed(false);setCopyFeedback('');}}>{product?.profile.searchSuggestions.map(s=><option key={s}>{s}</option>)}</select></label>
         <button type="button" disabled={!direction||sending} onClick={()=>void copyCurrentDirection()}>复制当前关键词</button>
@@ -82,10 +82,10 @@ export default function Discovery() {
       {copyFeedback&&<p role="status" style={{margin:0,color:copyFeedback.startsWith('已复制')?'#067647':'#b42318'}}>{copyFeedback}</p>}
       <label style={{display:'flex',gap:6,alignItems:'flex-start'}}><input type="checkbox" checked={searchConfirmed} disabled={sending||!direction} onChange={e=>setSearchConfirmed(e.target.checked)} />我已在小红书搜索框中搜索该关键词，并确认当前页面已显示搜索结果。</label>
     </div>
-    <p style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}><label htmlFor="discovery-max-posts">新任务帖子数量上限（1–100 篇）</label><input id="discovery-max-posts" type="number" inputMode="numeric" min={1} max={100} step={1} value={maxPostsInput} disabled={sending} aria-invalid={!maxPostsValid} onChange={e=>setMaxPostsInput(e.target.value)} style={{width:88,padding:'4px 6px'}} /></p>
+    <p className="sl-post-limit"><label htmlFor="discovery-max-posts">新任务帖子数量上限（1–100 篇）</label><input id="discovery-max-posts" type="number" inputMode="numeric" min={1} max={100} step={1} value={maxPostsInput} disabled={sending} aria-invalid={!maxPostsValid} onChange={e=>setMaxPostsInput(e.target.value)} style={{width:88,padding:'4px 6px'}} /></p>
     {!maxPostsValid&&<p role="alert" style={{marginTop:-8,color:'#b42318'}}>请输入 1 到 100 之间的整数。</p>}
-    <p>请确认搜索结果与该方向相关。本次最多处理你填写的帖子数量（1–100 篇），每篇最多 {LIMITS.maxSessionComments} 条评论，按顺序串行执行；不设全任务总时限。单篇主动处理超过 30 分钟会暂停，暂停时间不计入，可检查页面或模型后手动继续。若达到评论安全上限或页面显示数高于采集数，该帖子会标记为部分采集并跳过 AI 分析，不会伪装成完整结果。遇到登录、安全验证或风控提示也会暂停；评论与笔记将发送给已配置的 AI 服务分析，结果保存在本机。</p>
-    {blockingStart&&<p>上次任务还在运行。点击“开始新任务”后，插件会先自动暂停上次任务、保存进度，再尝试返回搜索结果页；已保存的评论和线索不会删除。</p>}
+    <div className="sl-notice sl-notice--warning sl-rule-note"><b>采集规则与安全边界</b><p>请确认搜索结果与该方向相关。每篇最多 {LIMITS.maxSessionComments} 条评论，按顺序串行执行，不设全任务总时限。单篇主动处理超过 30 分钟会暂停，暂停时间不计入，可检查页面或模型后手动继续。达到评论安全上限或页面显示数高于采集数时，该帖子会标记为部分采集并跳过 AI 分析，不会伪装成完整结果。遇到登录、安全验证或风控提示会暂停；评论与笔记将发送给已配置的 AI 服务分析，结果保存在本机。</p></div>
+    {blockingStart&&<div className="sl-notice sl-notice--warning">上次任务还在运行。开始新任务前会先暂停上次任务并保存进度；已保存的评论和线索不会删除。</div>}
     <button className="sl-button--primary" disabled={sending||!productId||!direction||!searchConfirmed||!maxPostsValid} onClick={()=>void start()}>{blockingStart?'开始新任务（自动暂停上次）':state?.status==='paused'?'开始新任务':'开始寻找客户'}</button>
     {state && <div className="sl-card sl-task-card" aria-live="polite">
       <b>{backgroundInterrupted?'上次任务在后台中断':state.status==='running'?'SeekLead 正在寻找客户':state.status==='paused'?'任务已暂停':job?.status==='partial'?'本次任务部分完成（有帖子未采全）':state.status==='completed'?'本次任务已结束':'任务已停止'}</b>
@@ -111,6 +111,6 @@ export default function Discovery() {
       </div>}
     </div>}
     {error && <ErrorNotice message={error} tone="error" />}
-    <p style={{fontSize:12,color:'#777'}}>遇验证码、登录或风控会暂停，不自动刷新或绕过。采用保守的只读、单页串行、有限任务、人工可暂停设计；尚未证明平台不会采取任何账号限制措施。</p>
+    <p className="sl-page-footnote">遇验证码、登录或风控会暂停，不自动刷新或绕过。采用只读、单页串行、有限任务、人工可暂停设计；这不能保证平台不会采取账号限制措施。</p>
   </section>;
 }

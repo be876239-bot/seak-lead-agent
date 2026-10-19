@@ -131,7 +131,7 @@ export default function Settings() {
   }, []);
 
   return (
-    <div className="sl-page" style={{ display: 'grid', gap: 16, fontSize: 13 }}>
+    <div className="sl-page sl-settings-page" style={{ display: 'grid', gap: 16, fontSize: 13 }}>
       <h2>设置</h2>
       <section className="sl-card" style={{ display: 'grid', gap: 8 }}>
         <h2 style={{ fontSize: 14, margin: 0 }}>模型与 Key</h2>
