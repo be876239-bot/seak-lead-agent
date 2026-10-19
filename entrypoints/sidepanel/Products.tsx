@@ -248,6 +248,7 @@ export default function Products() {
       <h2>产品</h2>
       <div className="sl-product-create" style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'stretch' }}>
         <input
+          data-onboarding-target="product-url"
           value={url}
           onChange={(e) => setUrl(e.target.value)}
           placeholder="粘贴产品官网链接（公网 http/https）"

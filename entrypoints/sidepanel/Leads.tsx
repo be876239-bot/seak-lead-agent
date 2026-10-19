@@ -119,7 +119,7 @@ export default function Leads() {
   );
 
   return (
-    <div className="sl-page sl-leads-page" style={{ display: 'grid', gap: 10, fontSize: 13 }}>
+    <div className="sl-page sl-leads-page" data-onboarding-target="lead-list" style={{ display: 'grid', gap: 10, fontSize: 13 }}>
       <h2>线索</h2>
       <div className="sl-lead-filters" style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
         <select value={productId ?? ''} onChange={(e) => setProductId(e.target.value || null)}>

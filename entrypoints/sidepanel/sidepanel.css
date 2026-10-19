@@ -425,3 +425,26 @@ pre { max-width: 100%; overflow-wrap: anywhere; }
   .sl-note-toolbar select { flex-basis: 100%; }
   .sl-post-limit input { margin-left: 0; }
 }
+
+
+
+
+/* Entry point for opening the onboarding guide. */
+.sl-help-button {
+  flex: 0 0 auto;
+  min-height: 30px;
+  padding: 6px 9px;
+  border-color: #d7e4f6;
+  background: #f5f9ff;
+  color: #1d4ed8;
+  font-size: 11px;
+}
+.sl-help-button:hover:not(:disabled) {
+  border-color: #93b4e8;
+  background: #edf5ff;
+}
+@media (max-width: 360px) {
+  .sl-header { align-items: flex-start; }
+  .sl-brand { font-size: 16px; }
+  .sl-help-button { padding: 5px 7px; }
+}

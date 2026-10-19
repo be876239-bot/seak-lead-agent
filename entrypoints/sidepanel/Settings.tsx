@@ -165,7 +165,7 @@ export default function Settings() {
         </label>
         <div style={{ display: 'flex', gap: 8 }}>
           <button
-            className="sl-button--primary"
+            data-onboarding-target="model-save" className="sl-button--primary"
             onClick={async () => {
               if (!apiKey.trim()) { setStatus('请先输入 Key'); return; }
               try {
