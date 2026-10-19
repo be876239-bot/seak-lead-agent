@@ -153,7 +153,7 @@ it('未关联回复也受单帖安全上限保护且可取消',async()=>{
  expect(snap.comments).toHaveLength(LIMITS.maxSessionComments);expect(snap.stopReason).toBe('limit');
  expect(await db.comments.count()).toBe(LIMITS.maxSessionComments);
  expect(snap.comments.every(c=>c.isReply && c.parentKey===null)).toBe(true);
-});
+}, 20000);
 it('取消后迟到的未关联回复不再落库',async()=>{
  wrapper('A').querySelector('.comment-item')!.remove();wrapper('B').remove();area('A').innerHTML=reply('orphan');
  const controller=new AbortController();

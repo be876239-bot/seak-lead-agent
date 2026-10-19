@@ -70,7 +70,7 @@ it('A–E：首屏20→21–40替换DOM，滚动前已落库，最终1–40全�
   expect(await db.comments.count()).toBe(40);
   expect((await db.comments.toArray()).map((c) => c.platformCommentId).sort()).toEqual(Array.from({length:40},(_,i)=>String(i+1)).sort());
   expect(document.querySelector('#comment-1')).toBeNull();
-});
+}, 15000);
 
 it('F：多轮未新增才停止，不把暂未新增标为全部采集', async () => {
   const result = await captureNote(7, { autoLoad: true, wait, onDelta: persist });

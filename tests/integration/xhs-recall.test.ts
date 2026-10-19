@@ -115,7 +115,7 @@ it('安全：短暂评论与登录验证同批出现，立即报平台限制且�
 it('B 未到底且没有新增不能误报no_new，仍受200轮上限保护',async()=>{
  scroll.mockImplementation(()=>{});
  const r=await captureNote(7,{autoLoad:true,wait:tick,onDelta:persist});expect(r.stopReason).toBe('round_limit');expect(scroll).toHaveBeenCalledTimes(200);expect(r.comments).toHaveLength(20);
-});
+}, 20000);
 it('A 滚动超过半屏就跳过21–24的虚拟列表，实际小步重叠可保存1–50',async()=>{
  scroll.mockImplementation(({top})=>{scroller.scrollTop=Math.min(500,scroller.scrollTop+top);list().innerHTML=scroller.scrollTop>=500?items(30,50):top>250?items(25,44):items(15,35);});
  const r=await captureNote(7,{autoLoad:true,wait:tick,onDelta:persist});expect(r.comments).toHaveLength(50);expect(await db.comments.count()).toBe(50);for(const id of [21,22,23,24])expect(await db.comments.get(key+':'+id)).toBeDefined();

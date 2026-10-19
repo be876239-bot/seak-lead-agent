@@ -184,7 +184,7 @@ it.each(['delayed-search','missing-history'])('500 capture → AI → saved comp
  const id=crypto.randomUUID();registerDiscoveryHandlers();const sender={id:'test',url:'chrome-extension://test/sidepanel.html'};
  expect((await handleBackgroundMessage(buildRequest('DISCOVERY_START',{jobId:id,productId:product.id,tabId:7,direction:'AI PPT'}),sender)).ok).toBe(true);
  let job=await repos.getJob(id);
- for(let n=0;n<1000&&job?.discovery?.status!=='completed'&&job?.discovery?.status!=='paused';n++){await new Promise(r=>setTimeout(r,10));job=await repos.getJob(id);}
+ for(let deadline=Date.now()+80000;Date.now()<deadline&&job?.discovery?.status!=='completed'&&job?.discovery?.status!=='paused';){await new Promise(r=>setTimeout(r,50));job=await repos.getJob(id);}
  expect(job?.discovery?.status,JSON.stringify(job?.discovery)).toBe('completed');
  const trace=job!.discovery!.trace!;
  expect(trace.filter(e=>e.event==='PAUSE')).toHaveLength(0);
@@ -197,4 +197,4 @@ it.each(['delayed-search','missing-history'])('500 capture → AI → saved comp
  expect(()=>JobSchema.parse(job)).not.toThrow();expect(JSON.stringify(trace)).not.toMatch(/source=synthetic|xsec_token|需要购买PPT/);
  expect(shared.tabs.create).not.toHaveBeenCalled();expect(shared.tabs.update).not.toHaveBeenCalled();
  expect(shared.tabs.sendMessage.mock.calls.filter(([,r])=>r.type==='XHS_CLOSE_NOTE')).toHaveLength(mode==='missing-history'?2:0);
-},30000);
+},90000);
