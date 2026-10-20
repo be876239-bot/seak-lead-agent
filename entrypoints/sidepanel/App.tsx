@@ -1,6 +1,7 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { browser } from 'wxt/browser';
 import Discovery from './Discovery';
+import BrandMark from '../../src/ui/BrandMark';
 import Products from './Products';
 import Leads from './Leads';
 import Settings from './Settings';
@@ -21,6 +22,8 @@ const TABS: { id: Tab; label: string }[] = [
 
 export default function App() {
   const [tab, setTab] = useState<Tab>('products');
+  const [guideDismissed, setGuideDismissed] = useState(true);
+  const [dismissalLoaded, setDismissalLoaded] = useState(false);
   const {
     state: onboardingState,
     loaded: onboardingLoaded,
@@ -31,7 +34,26 @@ export default function App() {
   } = useOnboardingController();
   const version = browser.runtime.getManifest().version;
 
+  useEffect(() => {
+    let active = true;
+    void browser.storage.local.get('onboarding.dismissed')
+      .then((values) => {
+        if (!active) return;
+        setGuideDismissed(values['onboarding.dismissed'] === true);
+        setDismissalLoaded(true);
+      })
+      .catch(() => {
+        if (!active) return;
+        // If local storage is temporarily unavailable, do not block normal use.
+        setGuideDismissed(false);
+        setDismissalLoaded(true);
+      });
+    return () => { active = false; };
+  }, []);
+
   const beginOrResumeGuide = useCallback(async () => {
+    setGuideDismissed(false);
+    void browser.storage.local.remove('onboarding.dismissed').catch(() => undefined);
     const next = await startOrResume();
     const stepId = currentOnboardingStep(next);
     if (stepId) {
@@ -39,31 +61,48 @@ export default function App() {
     }
   }, [startOrResume]);
 
+  const dismissGuide = useCallback(async () => {
+    setGuideDismissed(true);
+    try {
+      await browser.storage.local.set({ 'onboarding.dismissed': true });
+    } catch {
+      // The current view still closes even if persistence is unavailable.
+    }
+    if (onboardingState?.status === 'in_progress') await pauseOnboarding();
+  }, [onboardingState?.status, pauseOnboarding]);
+
   const versionButtonLabel = onboardingState?.status === 'completed' ? '重新学习引导' : '新手引导';
 
   return (
     <div className="sl-app">
       <header className="sl-header">
-        <h1 className="sl-brand">觅客 Agent <span className="sl-version">v{version}</span></h1>
-        <button type="button" className="sl-help-button" disabled={!onboardingLoaded} onClick={() => void beginOrResumeGuide()}>
+        <h1 className="sl-brand">
+          <BrandMark />觅客Agent <span className="sl-version">v{version}</span>
+        </h1>
+        <button
+          type="button"
+          className="sl-help-button"
+          disabled={!onboardingLoaded || !dismissalLoaded}
+          onClick={() => void beginOrResumeGuide()}
+        >
           {versionButtonLabel}
         </button>
       </header>
-      <nav className="sl-nav" aria-label="主要功能">
+      <nav aria-label="主要功能" className="sl-nav">
         {TABS.map((t) => (
           <button
             key={t.id}
             type="button"
-            className="sl-nav__button"
             aria-pressed={tab === t.id}
             onClick={() => setTab(t.id)}
+            className="sl-nav__button"
           >
             {t.label}
           </button>
         ))}
       </nav>
       <main className="sl-main">
-        {onboardingLoaded && (
+        {onboardingLoaded && dismissalLoaded && !guideDismissed && (
           <OnboardingGuide
             state={onboardingState}
             viewId={tab}
@@ -74,6 +113,7 @@ export default function App() {
             onRefresh={refreshOnboarding}
             onNavigate={setTab}
             onComplete={(stepId) => void completeStep(stepId)}
+            onDismiss={() => void dismissGuide()}
           />
         )}
         {tab === 'discovery' && (

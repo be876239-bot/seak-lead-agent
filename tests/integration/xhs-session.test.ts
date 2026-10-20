@@ -92,6 +92,24 @@ describe('XHS_GET_STATUS', () => {
   });
 });
 
+describe('XHS_RESEARCH_READ_NOTE', () => {
+  it('只读取当前笔记标题与正文摘录，不启动评论采集会话', async () => {
+    document.body.innerHTML = synthPageHtml(0);
+    const result = await handle('XHS_RESEARCH_READ_NOTE', {}) as { url: string; title: string; excerpt: string };
+    expect(result.url).toBe(`https://www.xiaohongshu.com/explore/${NOTE_ID}`);
+    expect(result.title).toBe('测试笔记');
+    expect(result.excerpt).toBe('正文内容');
+    expect(manager).toBeDefined();
+  });
+
+  it('非笔记页或登录遮挡页不返回研究内容', async () => {
+    useFixture('feed-only');
+    await expect(handle('XHS_RESEARCH_READ_NOTE', {})).rejects.toThrow('打开一篇相关笔记详情');
+    document.body.innerHTML = '<div class="login-container"><span>扫码登录</span></div>';
+    await expect(handle('XHS_RESEARCH_READ_NOTE', {})).rejects.toThrow();
+  });
+});
+
 describe('XHS_START_SESSION', () => {
   it('真实 fixture：返回快照并满足 SnapshotPayload；纯图片评论无文本被跳过', async () => {
     const snap = await startOn('note-detail-expanded');

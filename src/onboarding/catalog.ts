@@ -39,7 +39,7 @@ export const ONBOARDING_STEPS: Record<OnboardingStepId, OnboardingStepDefinition
     location: 'product-setup',
     target: 'product-url',
     title: '添加一个产品',
-    description: '粘贴产品官网链接并生成产品画像。已有产品会自动跳过这一步；完成后返回这里检查产品记录。',
+    description: '可以粘贴产品官网链接；如果没有官网，也可以在下方上传商家 TXT/Markdown 文档，或选择小红书产品名/商家账号研究。新来源会先生成待确认画像，核对或修正后再进入寻客。已有产品会自动跳过这一步。',
   },
   'search-keyword': {
     location: 'search-workflow',

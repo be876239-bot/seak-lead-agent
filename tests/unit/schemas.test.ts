@@ -6,7 +6,7 @@ import {
   ProductProfileSchema,
 } from '../../src/domain/schemas';
 import { RequestSchema, ResponseSchema, buildRequest } from '../../src/messaging/protocol';
-import { AppError, toErrorPayload } from '../../src/domain/errors';
+import { AppError, safeDiagnosticMessage, toErrorPayload } from '../../src/domain/errors';
 
 const claim = (over = {}) => ({ value: 'x', status: 'observed', evidence: [], ...over });
 
@@ -80,5 +80,17 @@ describe('errors', () => {
     expect(payload.message).not.toContain('secret');
     const app = new AppError('AI_RATE_LIMIT', '限流', true);
     expect(toErrorPayload(app)).toEqual({ code: 'AI_RATE_LIMIT', message: '限流', retryable: true });
+  });
+
+  it('safeDiagnosticMessage 保留排错信息并隐藏凭据、联系方式与 URL 查询参数', () => {
+    const detail = safeDiagnosticMessage(new TypeError(
+      'HTTP 400 https://api.example.com/v1?token=secret apiKey=sk-abcdefghijklmnopqrstuvwxyz123456 buyer@example.com',
+    ));
+    expect(detail).toContain('HTTP 400');
+    expect(detail).not.toContain('secret');
+    expect(detail).not.toContain('sk-abcdefghijklmnopqrstuvwxyz123456');
+    expect(detail).not.toContain('buyer@example.com');
+    expect(detail).toContain('[已隐藏]');
+    expect(detail).toContain('[查询参数已隐藏]');
   });
 });

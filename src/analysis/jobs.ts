@@ -1,11 +1,12 @@
 import { getProvider } from '../ai/factory';
 import { COMMENT_PROMPT_VERSION, PROFILE_PROMPT_VERSION } from '../ai/prompts';
-import { AppError, toErrorPayload } from '../domain/errors';
+import { AppError, safeDiagnosticMessage, toErrorPayload } from '../domain/errors';
 import { LIMITS } from '../domain/limits';
 import type { Job } from '../domain/schemas';
 import { registerSensitiveHandler } from '../messaging/handlers';
 import { readRenderedProduct } from '../product/render-reader';
 import { collectProductSources } from '../product/service';
+import { ResearchInputSchema, researchBlocks, requireConfirmedProduct } from '../product/research';
 import { loadCredential, resolveBaseUrl } from '../storage/credentials';
 import { getDb } from '../storage/db';
 import { Repositories } from '../storage/repositories';
@@ -44,24 +45,36 @@ export function baseJob(deps: RunnerDeps, id: string): Job {
     productId: null, profileVersion: null, tabId: null, noteKey: null,
     provider: deps.providerName, modelId: deps.modelId, promptVersion: PROFILE_PROMPT_VERSION,
     totalItems: 1, completedItems: 0, failedItems: 0,
-    createdAt: nowIso(), updatedAt: nowIso(), errorCode: null,
+    createdAt: nowIso(), updatedAt: nowIso(), errorCode: null, errorMessage: null,
   };
 }
 
-async function markFailedIfOpen(jobId: string, code: string): Promise<void> {
+function normalizeFailure(err: unknown): AppError {
+  if (err instanceof AppError) return err;
+  return new AppError('UNKNOWN', `未预期的内部错误：${safeDiagnosticMessage(err)}`);
+}
+
+function safeJobErrorMessage(err: unknown): string {
+  const failure = normalizeFailure(err);
+  const message = failure.code === 'AI_INVALID_OUTPUT'
+    ? (failure.message.split('：')[0] ?? failure.code)
+    : failure.message;
+  return safeDiagnosticMessage(message);
+}
+
+async function markFailedIfOpen(jobId: string, code: string, errorMessage?: string): Promise<void> {
   const job = await analysisRepos.getJob(jobId);
   if (!job || TERMINAL.includes(job.status)) return;
   await analysisRepos.updateJob(jobId, {
     status: code === 'CANCELLED' ? 'cancelled' : 'failed',
     errorCode: code as Job['errorCode'],
+    errorMessage: errorMessage ?? null,
   });
 }
 
 function failLog(jobId: string, err: unknown): void {
   const e = toErrorPayload(err);
-  // 校验类报错正文含引文原文（可能是评论文本）：日志只保留"："前的说明，不外泄正文
-  const detail = e.code === 'AI_INVALID_OUTPUT' ? (e.message.split('：')[0] ?? e.code) : e.message.slice(0, 200);
-  emitJobLog(jobId, `失败：${e.code} ${detail}`, 'error');
+  emitJobLog(jobId, `失败：${e.code} ${safeJobErrorMessage(err)}`, 'error');
 }
 
 export function registerAnalysisHandlers(): void {
@@ -85,16 +98,42 @@ export function registerAnalysisHandlers(): void {
       const product = await runProfileGeneration(deps, {
         jobId, inputUrl: sources.inputUrl, finalUrl: sources.finalUrl,
         blocks: sources.blocks, existingProductId,
+        source: { kind: 'website', description: '' }, confirmation: 'confirmed',
         log: (m) => emitJobLog(jobId, m),
       });
       emitJobLog(jobId, `画像已保存（产品 ${product.id}，画像版本 ${product.profileVersion}）`);
       return { jobId, productId: product.id };
     } catch (err) {
-      failLog(jobId, err);
-      await markFailedIfOpen(jobId, toErrorPayload(err).code);
-      throw err;
+      const failure = normalizeFailure(err);
+      failLog(jobId, failure);
+      await markFailedIfOpen(jobId, failure.code, safeJobErrorMessage(failure));
+      throw failure;
     } finally {
       capturing.delete(jobId);
+    }
+  });
+
+  registerSensitiveHandler('PRODUCT_RESEARCH_CREATE', async (req) => {
+    if (req.type !== 'PRODUCT_RESEARCH_CREATE') throw new Error('类型错误');
+    const { jobId } = req.payload;
+    const input = ResearchInputSchema.parse(req.payload.input);
+    const deps = await makeDeps();
+    await upsertJob(baseJob(deps, jobId));
+    try {
+      const blocks = researchBlocks(input);
+      emitJobLog(jobId, `开始生成产品画像草稿（来源：${input.source.kind}；${blocks.length} 个证据块）`);
+      const product = await runProfileGeneration(deps, {
+        jobId, inputUrl: '', finalUrl: '', blocks,
+        source: input.source, confirmation: 'draft',
+        log: (m) => emitJobLog(jobId, m),
+      });
+      emitJobLog(jobId, `画像草稿已保存（产品 ${product.id}，需用户确认后才能寻客）`);
+      return { jobId, productId: product.id, confirmation: 'draft' };
+    } catch (err) {
+      const failure = normalizeFailure(err);
+      failLog(jobId, failure);
+      await markFailedIfOpen(jobId, failure.code, safeJobErrorMessage(failure));
+      throw failure;
     }
   });
 
@@ -104,6 +143,7 @@ export function registerAnalysisHandlers(): void {
     const deps = await makeDeps();
     const product = await analysisRepos.getProduct(productId);
     if (!product) throw new AppError('STORAGE_ERROR', '产品不存在');
+    requireConfirmedProduct(product);
     await upsertJob({
       ...baseJob(deps, jobId), kind: 'comments', tabId, productId, status: 'collecting',
       totalItems: 0, promptVersion: COMMENT_PROMPT_VERSION,
@@ -143,8 +183,9 @@ export function registerAnalysisHandlers(): void {
       });
       emitJobLog(jobId, `任务结束：${job.status}${job.errorCode ? `（${job.errorCode}）` : ''}`);
     })().catch((err) => {
-      failLog(jobId, err);
-      return markFailedIfOpen(jobId, toErrorPayload(err).code);
+      const failure = normalizeFailure(err);
+      failLog(jobId, failure);
+      return markFailedIfOpen(jobId, failure.code, safeJobErrorMessage(failure));
     }).finally(() => {
       capturing.delete(jobId);
     });
@@ -190,8 +231,9 @@ export function registerAnalysisHandlers(): void {
     }, (m) => emitJobLog(req.payload.jobId, m)).then((job) => {
       emitJobLog(req.payload.jobId, `任务结束：${job.status}${job.errorCode ? `（${job.errorCode}）` : ''}`);
     }).catch((err) => {
-      failLog(req.payload.jobId, err);
-      return markFailedIfOpen(req.payload.jobId, toErrorPayload(err).code);
+      const failure = normalizeFailure(err);
+      failLog(req.payload.jobId, failure);
+      return markFailedIfOpen(req.payload.jobId, failure.code, safeJobErrorMessage(failure));
     });
     return { jobId: req.payload.jobId };
   });

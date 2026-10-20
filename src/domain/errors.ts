@@ -1,3 +1,5 @@
+import { redactText } from '../privacy/redact';
+
 export const ERROR_CODES = [
   'PERMISSION_DENIED',
   'URL_INVALID',
@@ -30,6 +32,20 @@ export class AppError extends Error {
     this.code = code;
     this.retryable = retryable;
   }
+}
+
+/**
+ * Retain useful failure context for local diagnostics while masking secrets,
+ * contact details, and URL query strings before storing or displaying it.
+ */
+export function safeDiagnosticMessage(err: unknown): string {
+  const raw = err instanceof Error ? err.name + ': ' + err.message : String(err);
+  return redactText(raw)
+    .replace(/((?:api[_-]?key|access[_-]?token|refresh[_-]?token|authorization|cookie)\s*[:=]\s*)(?:Bearer\s+)?[^\s,;&]+/gi, '$1[已隐藏]')
+    .replace(/Bearer\s+[^\s,;"']+/gi, 'Bearer [已隐藏]')
+    .replace(/\bsk-[A-Za-z0-9_-]{12,}\b/g, '[已隐藏的 API Key]')
+    .replace(/(https?:\/\/[^\s?#]+)\?[^\s#]*/gi, '$1?[查询参数已隐藏]')
+    .slice(0, 500);
 }
 
 export function toErrorPayload(err: unknown): { code: ErrorCode; message: string; retryable: boolean } {

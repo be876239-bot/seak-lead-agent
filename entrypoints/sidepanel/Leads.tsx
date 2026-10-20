@@ -119,18 +119,18 @@ export default function Leads() {
   );
 
   return (
-    <div className="sl-page sl-leads-page" data-onboarding-target="lead-list" style={{ display: 'grid', gap: 10, fontSize: 13 }}>
-      <h2>线索</h2>
-      <div className="sl-lead-filters" style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-        <select value={productId ?? ''} onChange={(e) => setProductId(e.target.value || null)}>
+    <div className="sl-page sl-leads-page" data-onboarding-target="lead-list">
+      <div className="sl-page-heading"><h2>线索</h2><span>原文与证据，供你判断</span></div>
+      <div className="sl-card sl-lead-filters sl-actions">
+        <select aria-label="筛选产品" value={productId ?? ''} onChange={(e) => setProductId(e.target.value || null)}>
           {products.length === 0 && <option value="">（尚无产品）</option>}
           {products.map((p) => <option key={p.id} value={p.id}>{p.profile.name.value ?? p.inputUrl}</option>)}
         </select>
-        <select value={filters.group} onChange={(e) => setFilters((f) => ({ ...f, group: e.target.value as Filters['group'] }))}>
+        <select aria-label="筛选意向分组" value={filters.group} onChange={(e) => setFilters((f) => ({ ...f, group: e.target.value as Filters['group'] }))}>
           <option value="all">全部分组</option>
           {GROUP_ORDER.map((g) => <option key={g} value={g}>{GROUP_TITLES[g]}</option>)}
         </select>
-        <select value={filters.handled} onChange={(e) => setFilters((f) => ({ ...f, handled: e.target.value as Filters['handled'] }))}>
+        <select aria-label="筛选处理状态" value={filters.handled} onChange={(e) => setFilters((f) => ({ ...f, handled: e.target.value as Filters['handled'] }))}>
           <option value="all">处理状态：全部</option>
           <option value="unhandled">未处理</option>
           <option value="handled">已处理</option>
@@ -138,7 +138,7 @@ export default function Leads() {
         <input value={filters.query} placeholder="搜索评论/需求摘要"
           onChange={(e) => setFilters((f) => ({ ...f, query: e.target.value }))} style={{ flex: 1, minWidth: 120 }} />
       </div>
-      <div className="sl-lead-actions" style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+      <div className="sl-lead-actions sl-actions">
         <button onClick={exportJson} disabled={!shown.length}>导出当前筛选 JSON</button>
         <button onClick={exportCsv} disabled={!shown.length}>导出当前筛选 CSV</button>
         <span style={{ color: '#888', fontSize: 12 }}>本地下载，共 {shown.length} 条；不含 Key 与原始未打码内容</span>
@@ -148,16 +148,23 @@ export default function Leads() {
       {!productId && <p style={{ color: '#777', margin: 0 }}>尚无产品，也就没有线索：先到“产品”页创建。</p>}
       {productId && shown.length === 0 && (
         <p style={{ color: '#777', margin: 0 }}>
-          当前筛选没有匹配线索。可能是还没分析过该产品的笔记，或评论已按保留期清理；换一个分组或到“当前笔记”页发起分析。
+          当前筛选没有匹配线索。可能是还没分析过该产品的笔记，或评论已按保留期清理；到“寻找客户”页发起批量搜索。
         </p>
       )}
       {shown.map((v) => {
         const note = notes[v.comment.noteKey];
         const stale = current && v.analysis.profileVersion !== current.profileVersion;
         return (
-          <div key={v.analysis.id} className="sl-card sl-lead-card" style={{ display: 'grid', gap: 6 }}>
-            <div className="sl-lead-meta" style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12, color: '#777' }}>
-              <span style={{ background: '#f3f3f3', borderRadius: 4, padding: '0 6px' }}>{GROUP_TITLES[v.group]}</span>
+          <details key={v.analysis.id} className="sl-card sl-lead-card" data-group={v.group} data-handled={v.handled}>
+            <summary className="sl-lead-summary">
+              <span className="sl-lead-summary__meta">
+                <span className="sl-badge" data-group={v.group}>{GROUP_TITLES[v.group]}</span>
+                <span className="sl-badge sl-handled-badge">{v.handled ? '已处理' : '未处理'}</span>
+              </span>
+              <b>{v.analysis.decision.needSummary}</b>
+              <span className="sl-lead-summary__intent">意向：{intentShortCn(v.analysis.decision)} · 匹配：{PRODUCT_FIT_CN[v.analysis.decision.productFit]}</span>
+            </summary>
+            <div className="sl-lead-meta sl-actions">
               <span>{v.source === 'human' ? `人工纠正（模型原判：${GROUP_TITLES[v.modelGroup]}）` : '模型结果'}</span>
               {stale && <span style={{ color: '#b60' }}>画像 v{v.analysis.profileVersion}（当前 v{current!.profileVersion}）</span>}
               <span style={{ marginLeft: 'auto' }}>
@@ -166,13 +173,13 @@ export default function Leads() {
                   : (note?.title ?? '笔记快照已过期')}
               </span>
             </div>
-            <div style={{ color: '#666' }}>
+            <div className="sl-lead-author">
               {v.comment.authorDisplayName ?? '（页面无昵称）'}
               {v.comment.locationText ? ` · ${v.comment.locationText}` : ''}
             </div>
-            {!v.comment.parentKey && !v.comment.isReply && <div>{v.comment.text}</div>}
-            <div><b>{v.analysis.decision.needSummary}</b>
-              <span style={{ color: '#777', marginLeft: 6 }}>
+            {!v.comment.parentKey && !v.comment.isReply && <blockquote className="sl-comment-original">{v.comment.text}</blockquote>}
+            <div className="sl-need-summary">
+              <span style={{ color: '#777', marginLeft: 0 }}>
                 意向：{intentShortCn(v.analysis.decision)} · 匹配：{PRODUCT_FIT_CN[v.analysis.decision.productFit]}
               </span>
               {needsTargetBadge(v.analysis.decision) === 'competitor' && (
@@ -180,11 +187,17 @@ export default function Leads() {
               )}
             </div>
             {v.analysis.decision.evidence.length > 0 && (
-              <div style={{ color: '#999', fontSize: 12 }}>证据：{v.analysis.decision.evidence.map((e) => e.quote).join(' / ')}</div>
+              <details className="sl-claim-evidence">
+                <summary>查看证据（{v.analysis.decision.evidence.length}）</summary>
+                <div className="sl-evidence">{v.analysis.decision.evidence.map((e) => e.quote).join(' / ')}</div>
+              </details>
             )}
-            <LeadExplanation decision={v.analysis.decision} profileUrl={v.comment.profileUrl} comment={v.comment} parentComment={v.parentComment} />
+            <details className="sl-claim-evidence">
+              <summary>判断理由与上下文</summary>
+              <LeadExplanation decision={v.analysis.decision} profileUrl={v.comment.profileUrl} comment={v.comment} parentComment={v.parentComment} />
+            </details>
             {v.correction?.note && <div style={{ color: '#07c', fontSize: 12 }}>纠正备注：{v.correction.note}</div>}
-            <div style={{ display: 'flex', gap: 10, alignItems: 'center', fontSize: 12 }}>
+            <div className="sl-lead-footer sl-actions">
               <label style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
                 <input type="checkbox" checked={v.handled} onChange={(e) => void toggleHandled(v, e.target.checked)} />已处理
               </label>
@@ -201,7 +214,7 @@ export default function Leads() {
                 <button onClick={() => { setEditing(v.analysis.id); setDraftGroup(v.group); setDraftNote(''); }}>修改分组/备注</button>
               )}
             </div>
-          </div>
+          </details>
         );
       })}
     </div>

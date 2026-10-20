@@ -9,6 +9,8 @@ import JobLogPanel from './JobLog';
 import ErrorNotice from '../../src/ui/ErrorNotice';
 import { copyTextToClipboard } from '../../src/ui/clipboard';
 import { getSelectedProductId, setSelectedProductId, ui } from '../../src/ui/store';
+import ProductResearchForm from './ProductResearchForm';
+import { isProductConfirmed } from '../../src/product/research';
 
 const CLAIM_ROWS: { key: 'name' | 'category' | 'summary' | 'accessMethod' | 'price' | 'purchaseChannel'; label: string }[] = [
   { key: 'name', label: '名称' },
@@ -59,7 +61,7 @@ function ProfileView({ product }: { product: Product }) {
   };
 
   return (
-    <div className="sl-profile" style={{ display: 'grid', gap: 6, fontSize: 12 }}>
+    <div className="sl-profile">
       {unknowns.includes('类别') && (
         <p style={{ background: '#fff7e6', border: '1px solid #ffd591', padding: 6, margin: 0 }}>
           类别未知：画像完整度较低。可以照常分析评论，但不会根据猜测补充结论。
@@ -68,19 +70,22 @@ function ProfileView({ product }: { product: Product }) {
       {CLAIM_ROWS.map(({ key, label }) => {
         const claim = product.profile[key];
         return (
-          <div key={key}>
-            <b>{label}</b>
-            <span style={{ marginLeft: 6, color: claim.status === 'unknown' ? '#999' : '#333' }}>
-              [{STATUS_LABELS[claim.status]}]
-            </span>
-            <span style={{ marginLeft: 6 }}>{claim.value ?? '未知（不阻塞其他信息）'}</span>
+          <div key={key} className="sl-profile-row">
+            <span className="sl-profile-row__label">{label}</span>
+            <div className="sl-profile-row__value">
+            <span className="sl-claim-status" data-status={claim.status}>{STATUS_LABELS[claim.status]}</span>
+            <span>{claim.value ?? '未知（不阻塞其他信息）'}</span>
             {claim.evidence.length > 0 && (
-              <ul style={{ margin: '2px 0', paddingLeft: 18 }}>
-                {claim.evidence.map((e, i) => (
-                  <li key={i} style={{ color: '#777' }}>依据 {e.sourceId}：{e.quote}</li>
-                ))}
-              </ul>
+              <details className="sl-claim-evidence">
+                <summary>查看证据（{claim.evidence.length}）</summary>
+                <ul style={{ margin: '2px 0', paddingLeft: 18 }}>
+                  {claim.evidence.map((e, i) => (
+                    <li key={i} style={{ color: '#777' }}>来源 {product.sourceBlocks.find(block => block.id === e.sourceId)?.title ?? e.sourceId}：{e.quote}</li>
+                  ))}
+                </ul>
+              </details>
             )}
+            </div>
           </div>
         );
       })}
@@ -88,12 +93,17 @@ function ProfileView({ product }: { product: Product }) {
         const items = product.profile[key];
         if (!items.length) return null;
         return (
-          <div key={key}>
-            <b>{label}</b>
-            <ul style={{ margin: '2px 0', paddingLeft: 18 }}>
+          <div key={key} className="sl-profile-row">
+            <span className="sl-profile-row__label">{label}</span>
+            <ul className="sl-profile-list">
               {items.map((c, i) => (
                 <li key={i}>[{STATUS_LABELS[c.status]}] {c.value}
-                  {c.evidence.length > 0 && <span style={{ color: '#777' }}>（依据 {c.evidence[0]!.sourceId}：{c.evidence[0]!.quote}）</span>}
+                  {c.evidence.length > 0 && (
+                    <details className="sl-claim-evidence">
+                      <summary>查看来源</summary>
+                      <span style={{ color: '#777' }}>来源 {product.sourceBlocks.find(block => block.id === c.evidence[0]!.sourceId)?.title ?? c.evidence[0]!.sourceId}：{c.evidence[0]!.quote}</span>
+                    </details>
+                  )}
                 </li>
               ))}
             </ul>
@@ -101,25 +111,65 @@ function ProfileView({ product }: { product: Product }) {
         );
       })}
       {product.profile.searchSuggestions.length > 0 && (
-        <section style={{ display: 'grid', gap: 5, borderTop: '1px solid #eee', paddingTop: 6 }}>
-          <b>建议搜索关键词</b>
+        <details className="sl-keywords">
+          <summary>建议搜索关键词（{product.profile.searchSuggestions.length}）</summary>
           <p style={{ margin: 0, color: '#666' }}>选择一个关键词复制，再粘贴到小红书搜索框并点击搜索。关键词只是建议，可按实际需要修改。</p>
+          <div className="sl-keyword-list">
           {product.profile.searchSuggestions.map((suggestion, index) => (
-            <div key={`${index}:${suggestion}`} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span style={{ flex: 1, overflowWrap: 'anywhere' }}>{suggestion}</span>
-              <button type="button" onClick={() => void copySuggestion(suggestion, index)}>
+            <div key={`${index}:${suggestion}`} className="sl-keyword">
+              <span className="sl-keyword-text">{suggestion}</span>
+              <button type="button" aria-label={`复制关键词：${suggestion}`} onClick={() => void copySuggestion(suggestion, index)}>
                 {copiedIndex === index ? '已复制' : '复制关键词'}
               </button>
             </div>
           ))}
+          </div>
           {copyFeedback && (
             <p role={copyFeedback.error ? 'alert' : 'status'} style={{ margin: 0, color: copyFeedback.error ? '#b42318' : '#067647' }}>
               {copyFeedback.text}
             </p>
           )}
-        </section>
+        </details>
       )}
     </div>
+  );
+}
+
+function DraftProfileEditor({ product, onSaved }: { product: Product; onSaved: () => Promise<void> }) {
+  const [name, setName] = useState(product.profile.name.value ?? '');
+  const [category, setCategory] = useState(product.profile.category.value ?? '');
+  const [summary, setSummary] = useState(product.profile.summary.value ?? '');
+  const [keywords, setKeywords] = useState(product.profile.searchSuggestions.join('\n'));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const claim = (value: string) => value.trim()
+    ? { value: value.trim(), status: 'user_edited' as const, evidence: [] }
+    : { value: null, status: 'unknown' as const, evidence: [] };
+  const save = async () => {
+    setSaving(true); setError('');
+    try {
+      await ui.applyUserEdit(product.id, {
+        name: claim(name), category: claim(category), summary: claim(summary),
+        searchSuggestions: [...new Set(keywords.split(/[\n,，]/).map(v => v.trim()).filter(Boolean))].slice(0, 8),
+      });
+      await onSaved();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '保存修改失败');
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <details className="sl-stack">
+      <summary>修正画像（名称、类别、概述、搜索词）</summary>
+      <label className="sl-field">产品名称<input value={name} onChange={e => setName(e.target.value)} disabled={saving} /></label>
+      <label className="sl-field">产品类别<input value={category} onChange={e => setCategory(e.target.value)} disabled={saving} /></label>
+      <label className="sl-field">产品概述<textarea rows={3} value={summary} onChange={e => setSummary(e.target.value)} disabled={saving} /></label>
+      <label className="sl-field">建议搜索词（每行一个，最多 8 个）<textarea rows={4} value={keywords} onChange={e => setKeywords(e.target.value)} disabled={saving} /></label>
+      <button type="button" onClick={() => void save()} disabled={saving}>{saving ? '保存中…' : '保存画像修改'}</button>
+      {error && <p role="alert" className="sl-notice sl-notice--warning">{error}</p>}
+      <p className="sl-page-footnote">人工修改会标记为“用户编辑”，不会伪装成来源证据。保存修改后仍需单独确认画像。</p>
+    </details>
   );
 }
 
@@ -154,7 +204,11 @@ export default function Products() {
         if (res.job && !isJobActive(res.job)) {
           if (pollRef.current) window.clearInterval(pollRef.current);
           pollRef.current = null;
-          setError(res.job.errorCode ? `任务${jobPhaseLabel(res.job)}（${res.job.errorCode}）` : null);
+          setError(res.job.errorCode
+            ? res.job.errorMessage
+              ? '任务' + jobPhaseLabel(res.job) + '（' + res.job.errorCode + '）：' + res.job.errorMessage
+              : '任务' + jobPhaseLabel(res.job) + '（' + res.job.errorCode + '）'
+            : null);
           await refresh();
         }
       } catch (err) {
@@ -216,12 +270,35 @@ export default function Products() {
   };
 
   const select = async (id: string) => {
+    const candidate = products.find(p => p.id === id);
+    if (candidate && !isProductConfirmed(candidate)) {
+      setInfo('这个产品画像还未确认。请先查看证据、修正必要信息并点击“确认画像并用于寻客”。');
+      return;
+    }
     setSelectedId(id);
     await setSelectedProductId(id);
   };
 
+  const confirmDraft = async (p: Product) => {
+    setError(null);
+    if (!p.profile.name.value?.trim() || p.profile.searchSuggestions.length === 0) {
+      setInfo('请先修正画像，至少填写产品名称并保留一个建议搜索词，再确认。');
+      setExpandedId(p.id);
+      return;
+    }
+    try {
+      await ui.confirmProduct(p.id);
+      setSelectedId(p.id);
+      await setSelectedProductId(p.id);
+      await refresh();
+      setInfo('画像已确认并设为当前产品。现在可以进入“寻找客户”开始批量寻客。');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '确认画像失败');
+    }
+  };
+
   const remove = async (p: Product) => {
-    const label = p.profile.name.value ?? p.inputUrl;
+    const label = p.profile.name.value ?? p.source?.productName ?? p.source?.targetProduct ?? p.source?.account ?? (p.inputUrl || '未命名产品');
     if (!window.confirm(`删除产品「${label}」及其全部线索、纠正与处理状态？不可撤销。`)) return;
     await ui.deleteProduct(p.id);
     if (selectedId === p.id) {
@@ -232,6 +309,11 @@ export default function Products() {
   };
 
   const reuse = async (p: Product) => {
+    if (!isProductConfirmed(p)) {
+      setInfo('这是一份待确认画像，不能直接复用。请先检查并确认。');
+      setExpandedId(p.id);
+      return;
+    }
     setSelectedId(p.id);
     setExpandedId(p.id);
     await setSelectedProductId(p.id);
@@ -244,15 +326,15 @@ export default function Products() {
     ? products.find((p) => urlKey(p.inputUrl) === key || urlKey(p.finalUrl) === key)
     : undefined;
   return (
-    <div className="sl-page sl-products-page" style={{ display: 'grid', gap: 10, fontSize: 13 }}>
-      <h2>产品</h2>
-      <div className="sl-product-create" style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'stretch' }}>
+    <div className="sl-page sl-products-page">
+      <div className="sl-page-heading"><h2>产品</h2><span>理解产品，再寻找客户</span></div>
+      <div className="sl-product-create">
         <input
+          aria-label="产品官网链接"
           data-onboarding-target="product-url"
           value={url}
           onChange={(e) => setUrl(e.target.value)}
           placeholder="粘贴产品官网链接（公网 http/https）"
-          style={{ flex: 1 }}
           disabled={busy}
         />
         <button className="sl-button--primary" onClick={() => void start()} disabled={busy}>{busy ? '识别中…' : '读取并生成画像'}</button>
@@ -268,7 +350,7 @@ export default function Products() {
       {error && <ErrorNotice message={error} tone="error" />}
       {info && <p style={{ color: '#0a7', margin: 0 }}>{info}</p>}
       {match && (
-        <div className="sl-notice sl-notice--info sl-product-match" style={{ fontSize: 12 }}>
+        <div className="sl-notice sl-notice--info sl-product-match">
           这个链接已识别过：{match.profile.name.value ?? hostOf(match.inputUrl)}（画像 v{match.profileVersion}，{match.updatedAt.slice(0, 16).replace('T', ' ')} 更新）。
           <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
             <button onClick={() => void reuse(match)}>直接复用（不调用模型）</button>
@@ -276,40 +358,67 @@ export default function Products() {
           </div>
         </div>
       )}
+      <ProductResearchForm onCreated={async (productId) => {
+        await refresh();
+        setExpandedId(productId);
+        setInfo('画像草稿已生成，请检查来源证据并修正必要信息。确认前不能进入寻客。');
+      }} />
       <JobLogPanel jobId={jobId} />
-      {products.length === 0 && !busy && <p style={{ color: '#777' }}>还没有产品：贴上链接即可自动识别，无需填写问卷。</p>}
+      {products.length === 0 && !busy && <p className="sl-empty">还没有产品：贴上链接即可自动识别，无需填写问卷。</p>}
       {products.map((p) => {
-        const name = p.profile.name.value ?? p.inputUrl;
+        const name = p.profile.name.value ?? p.source?.productName ?? p.source?.targetProduct ?? p.source?.account ?? (p.inputUrl || '未命名产品');
+        const confirmed = isProductConfirmed(p);
+        const sourceLabel = p.source?.kind === 'document' ? '商家文档'
+          : p.source?.kind === 'xhs_product' ? '小红书产品名研究'
+          : p.source?.kind === 'xhs_account' ? '小红书商家账号研究' : '官网';
         return (
-          <div key={p.id} className="sl-card sl-product-card" style={{ display: 'grid', gap: 8 }}>
-            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-              <label style={{ display: 'flex', gap: 4, alignItems: 'center', flex: 1 }}>
+          <div key={p.id} className="sl-card sl-product-card" data-selected={selectedId === p.id} data-confirmation={confirmed ? 'confirmed' : 'draft'}>
+            <div className="sl-product-heading">
+              <label className="sl-product-select">
                 <input
-                  type="radio" name="selectedProduct" checked={selectedId === p.id}
+                  type="radio" name="selectedProduct" checked={selectedId === p.id && confirmed}
+                  disabled={!confirmed}
                   onChange={() => void select(p.id)}
                 />
-                <b>{name}</b>
+                <span className="sl-product-avatar" aria-hidden="true">{name.slice(0, 2).toUpperCase()}</span>
+                <span className="sl-product-name"><b>{name}</b><small>{sourceLabel} · 画像 v{p.profileVersion} · {p.updatedAt.slice(5, 10)}{p.inputUrl ? ` · ${hostOf(p.inputUrl)}` : ''}</small></span>
               </label>
-              <span style={{ color: '#999' }}>画像 v{p.profileVersion}</span>
-              <button onClick={() => setExpandedId(expandedId === p.id ? null : p.id)}>
+              {confirmed
+                ? selectedId === p.id && <span className="sl-badge sl-badge--selected">当前产品</span>
+                : <span className="sl-badge">待确认画像</span>}
+            </div>
+            <div className="sl-product-tools sl-actions">
+              <button aria-expanded={expandedId === p.id} onClick={() => setExpandedId(expandedId === p.id ? null : p.id)}>
                 {expandedId === p.id ? '收起' : '查看画像'}
               </button>
-              <button onClick={() => void remove(p)}>删除</button>
+              <button className="sl-button--danger" onClick={() => void remove(p)}>删除</button>
             </div>
             {expandedId === p.id && (
               <>
                 <ProfileView product={p} />
-                <p style={{ color: '#999', margin: '4px 0 0' }}>
-                  来源：{p.finalUrl}（{p.sourceBlocks.length} 个来源块，读取于 {p.updatedAt.slice(0, 10)}）
+                {!confirmed && (
+                  <>
+                    <DraftProfileEditor product={p} onSaved={async () => { await refresh(); setInfo('修改已保存。请再次核对画像后确认。'); }} />
+                    <button className="sl-button--primary" type="button" onClick={() => void confirmDraft(p)}>确认画像并用于寻客</button>
+                  </>
+                )}
+                <p className="sl-page-footnote">
+                  来源：{sourceLabel}{p.source?.fileName ? ` · ${p.source.fileName}` : ''}{p.finalUrl ? ` · ${p.finalUrl}` : ''}（{p.sourceBlocks.length} 个证据块，读取于 {p.updatedAt.slice(0, 10)}）
                 </p>
+                {p.sourceBlocks.map(block => (
+                  <details key={block.id} className="sl-stack">
+                    <summary>{block.title ?? block.id}{block.url ? ` · ${block.url}` : ''}</summary>
+                    <p style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{block.text.slice(0, 1800)}{block.text.length > 1800 ? '…（内容已截断显示）' : ''}</p>
+                  </details>
+                ))}
               </>
             )}
           </div>
         );
       })}
       {products.length > 0 && (
-        <section className="sl-history" style={{ display: 'grid', gap: 4, borderTop: '1px solid #eee', paddingTop: 8 }}>
-          <b style={{ fontSize: 12 }}>历史记录（最近 5 条）</b>
+        <details className="sl-history sl-stack">
+          <summary>历史记录（最近 5 条）</summary>
           {[...products]
             .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
             .slice(0, 5)
@@ -325,7 +434,7 @@ export default function Products() {
           <p style={{ color: '#888', margin: 0, fontSize: 11 }}>
             点记录即选为当前产品（不花费用）；画像保存在本机 IndexedDB，删除产品才会清除。
           </p>
-        </section>
+        </details>
       )}
     </div>
   );

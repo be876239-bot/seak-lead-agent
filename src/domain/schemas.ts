@@ -48,16 +48,32 @@ export type ProductProfile = z.infer<typeof ProductProfileSchema>;
 
 export const ProductSourceBlockSchema = z.object({
   id: z.string().min(1).max(32),
-  url: z.string().url().max(LIMITS.maxUrlChars),
+  url: z.union([z.string().url().max(LIMITS.maxUrlChars), z.literal('')]),
+  origin: z.enum(['website', 'document', 'user_provided', 'xhs_manual']).optional(),
+  title: z.string().max(300).optional(),
   text: z.string().max(LIMITS.maxProductChars),
   fetchedAt: UtcIso,
 });
 export type ProductSourceBlock = z.infer<typeof ProductSourceBlockSchema>;
 
+export const ProductSourceSchema = z.object({
+  kind: z.enum(['website', 'document', 'xhs_product', 'xhs_account']),
+  description: z.string().max(2000),
+  productName: z.string().max(200).optional(),
+  account: z.string().max(2048).optional(),
+  category: z.string().max(200).optional(),
+  targetProduct: z.string().max(200).optional(),
+  fileName: z.string().max(300).optional(),
+  truncated: z.boolean().optional(),
+});
+export type ProductSource = z.infer<typeof ProductSourceSchema>;
+
 export const ProductSchema = z.object({
   id: z.string().uuid(),
-  inputUrl: z.string().url().max(LIMITS.maxUrlChars),
-  finalUrl: z.string().url().max(LIMITS.maxUrlChars),
+  inputUrl: z.union([z.string().url().max(LIMITS.maxUrlChars), z.literal('')]),
+  finalUrl: z.union([z.string().url().max(LIMITS.maxUrlChars), z.literal('')]),
+  confirmation: z.enum(['draft', 'confirmed']).optional(),
+  source: ProductSourceSchema.optional(),
   profileVersion: z.number().int().min(1),
   profile: ProductProfileSchema,
   sourceBlocks: z.array(ProductSourceBlockSchema).max(LIMITS.maxProductPages),
@@ -167,7 +183,8 @@ export const CaptureBudgetSchema = z.object({
   displayedCommentCount:z.number().int().nonnegative().nullable().default(null),
   elapsedMs:z.number().min(0).max(LIMITS.captureHardDurationMs),
   rounds:z.number().int().min(0).max(LIMITS.captureHardRounds),
-  durationMs:z.number().min(LIMITS.captureMaxDurationMs).max(LIMITS.captureHardDurationMs),
+  // D021 persisted checkpoints may still contain the old 3-minute base duration.
+  durationMs:z.number().min(LIMITS.captureMinimumStoredDurationMs).max(LIMITS.captureHardDurationMs),
   maxRounds:z.number().int().min(LIMITS.captureMaxRounds).max(LIMITS.captureHardRounds),
   progressCount:z.number().int().min(0).max(LIMITS.maxSessionComments),
   lastProgressElapsedMs:z.number().min(0).max(LIMITS.captureHardDurationMs),
@@ -214,6 +231,7 @@ export const JobSchema = z.object({
   createdAt: UtcIso,
   updatedAt: UtcIso,
   errorCode: z.string().max(64).nullable(),
+  errorMessage: z.string().max(600).nullable().optional(),
   collection: CaptureProgressSchema.optional(),
   discovery: z.object({
     status:z.enum(['running','paused','stopped','completed']),index:z.number().int().min(0).max(100),total:z.number().int().min(0).max(100),
@@ -224,7 +242,7 @@ export const JobSchema = z.object({
     post:z.object({stage:z.enum(['capturing','captured','completed','partial']),commentKeys:z.array(z.string().max(512)).max(LIMITS.maxSessionComments),captureBudget:CaptureBudgetSchema.optional(),replyLoadWarnings:ReplyLoadWarningsSchema.optional()}).optional(),
     trace:z.array(DiscoveryTraceSchema).max(200).optional(),
     targets:z.array(z.string().url().max(LIMITS.maxUrlChars)).max(100),sourceTabId:z.number().int().nonnegative(),
-    phase:z.string().max(300),reason:z.string().max(500).nullable(),postElapsedMs:z.number().int().min(0).max(LIMITS.discoveryPostTimeoutMs).default(0),direction:z.string().max(200),
+    phase:z.string().max(300),reason:z.string().max(500).nullable(),postElapsedMs:z.number().int().min(0).max(LIMITS.discoveryPostHardTimeoutMs).default(0),direction:z.string().max(200),
   }).optional(),
 });
 export type Job = z.infer<typeof JobSchema>;

@@ -36,11 +36,14 @@ export class Repositories {
   async createProduct(input: {
     inputUrl: string; finalUrl: string; profile: ProductProfile;
     sourceBlocks: Product['sourceBlocks']; modelId: string; promptVersion: string;
+    source?: Product['source']; confirmation?: Product['confirmation'];
   }): Promise<Product> {
     const product: Product = {
       id: crypto.randomUUID(),
       inputUrl: input.inputUrl,
       finalUrl: input.finalUrl,
+      confirmation: input.confirmation ?? 'confirmed',
+      ...(input.source ? { source: input.source } : {}),
       profileVersion: 1,
       profile: input.profile,
       sourceBlocks: input.sourceBlocks,
@@ -53,14 +56,31 @@ export class Repositories {
     return product;
   }
 
-  async replaceProfile(id: string, profile: ProductProfile, sourceBlocks?: Product['sourceBlocks']): Promise<Product> {
+  async replaceProfile(
+    id: string,
+    profile: ProductProfile,
+    sourceBlocks?: Product['sourceBlocks'],
+    metadata?: { source?: Product['source']; confirmation?: Product['confirmation'] },
+  ): Promise<Product> {
     return this.db.transaction('rw', this.db.products, async () => {
       const existing = await this.db.products.get(id);
       if (!existing) throw new AppError('STORAGE_ERROR', '产品不存在');
       const updated: Product = {
         ...existing, profile, profileVersion: existing.profileVersion + 1, updatedAt: nowIso(),
         sourceBlocks: sourceBlocks ?? existing.sourceBlocks,
+        ...(metadata?.source ? { source: metadata.source } : {}),
+        ...(metadata?.confirmation ? { confirmation: metadata.confirmation } : {}),
       };
+      await this.db.products.put(updated);
+      return updated;
+    });
+  }
+
+  async confirmProduct(id: string): Promise<Product> {
+    return this.db.transaction('rw', this.db.products, async () => {
+      const existing = await this.db.products.get(id);
+      if (!existing) throw new AppError('STORAGE_ERROR', '产品不存在');
+      const updated: Product = { ...existing, confirmation: 'confirmed', updatedAt: nowIso() };
       await this.db.products.put(updated);
       return updated;
     });

@@ -42,18 +42,25 @@ export class SerialDiscovery {
     if(restored) {this.started=true;Object.assign(this.state,restored,{status:'paused',total:this.urls.length,postElapsedMs:restored.postElapsedMs??0});this.totals.set(restored.index,{comments:restored.currentComments,leads:restored.currentLeads});}
   }
   private activePostElapsedMs() { return Math.max(0,this.state.postElapsedMs+(this.postActiveStartedAt===null?0:this.deps.now()-this.postActiveStartedAt)); }
-  private publish(name?:string,source='runner') { const state = {...this.state,postElapsedMs:Math.min(this.deps.postTimeoutMs??LIMITS.discoveryPostTimeoutMs,this.activePostElapsedMs())}; const event=name?{name,source,runId:this.runId,at:this.deps.now(),navigation:this.deps.observe?.()}:undefined;this.writes = this.writes.then(()=>this.deps.changed(state,event)).catch(()=>{this.state.status='stopped';this.state.reason='本地存储异常，任务已停止';this.controller.abort();}); }
+  private currentPostTimeoutMs() {
+    if(this.deps.postTimeoutMs!==undefined)return this.deps.postTimeoutMs;
+    const captureDuration=this.state.post?.captureBudget?.durationMs;
+    if(captureDuration===undefined)return LIMITS.discoveryPostTimeoutMs;
+    return Math.min(LIMITS.discoveryPostHardTimeoutMs,Math.max(LIMITS.discoveryPostTimeoutMs,captureDuration+LIMITS.discoveryPostAnalysisGraceMs));
+  }
+  private publish(name?:string,source='runner') { const state = {...this.state,postElapsedMs:Math.min(this.currentPostTimeoutMs(),this.activePostElapsedMs())}; const event=name?{name,source,runId:this.runId,at:this.deps.now(),navigation:this.deps.observe?.()}:undefined;this.writes = this.writes.then(()=>this.deps.changed(state,event)).catch(()=>{this.state.status='stopped';this.state.reason='本地存储异常，任务已停止';this.controller.abort();}); }
   private clearPostTimer() { if(this.postTimer)clearTimeout(this.postTimer);this.postTimer=null; }
-  private freezePostClock() { this.clearPostTimer();if(this.postActiveStartedAt!==null){this.state.postElapsedMs=Math.min(this.deps.postTimeoutMs??LIMITS.discoveryPostTimeoutMs,this.activePostElapsedMs());this.postActiveStartedAt=null;} }
+  private freezePostClock() { this.clearPostTimer();if(this.postActiveStartedAt!==null){this.state.postElapsedMs=Math.min(this.currentPostTimeoutMs(),this.activePostElapsedMs());this.postActiveStartedAt=null;} }
   private resetPostClock() { this.clearPostTimer();this.postActiveStartedAt=null;this.state.postElapsedMs=0; }
   private timeoutPost() {
     if(this.state.status!=='running')return;
-    this.freezePostClock();this.state.postElapsedMs=0;this.state.status='paused';this.state.reason=`单篇笔记主动处理达到${Math.round((this.deps.postTimeoutMs??LIMITS.discoveryPostTimeoutMs)/60_000)}分钟上限（暂停时间不计入）；已暂停并保留已保存结果，请检查页面/模型后手动继续。`;this.state.phase='单篇处理超时，等待人工检查';this.controller.abort();this.publish('POST_TIMEOUT','post-timeout');
+    const timeoutMs=this.currentPostTimeoutMs();
+    this.freezePostClock();this.state.postElapsedMs=0;this.state.status='paused';this.state.reason=`单篇笔记主动处理达到${Math.round(timeoutMs/60_000)}分钟上限（暂停时间不计入）；已暂停并保留已保存结果，请检查页面/模型后手动继续。`;this.state.phase='单篇处理超时，等待人工检查';this.controller.abort();this.publish('POST_TIMEOUT','post-timeout');
   }
   private startPostClock() {
     if(this.state.status!=='running'||this.state.index>=this.urls.length||this.isTerminalPost())return;
     if(this.postActiveStartedAt===null)this.postActiveStartedAt=this.deps.now();
-    const remaining=(this.deps.postTimeoutMs??LIMITS.discoveryPostTimeoutMs)-this.activePostElapsedMs();
+    const remaining=this.currentPostTimeoutMs()-this.activePostElapsedMs();
     if(remaining<=0){this.timeoutPost();return;}
     this.clearPostTimer();this.postTimer=setTimeout(()=>{this.postTimer=null;this.timeoutPost();},remaining);
   }
@@ -151,7 +158,15 @@ export class SerialDiscovery {
           if(this.state.index!==processingIndex||this.state.post?.stage!=='capturing'||(signal.aborted&&this.state.status==='running'))return;
           const previous=this.state.post.captureBudget;
           if(previous&&(value.elapsedMs<previous.elapsedMs||value.rounds<previous.rounds))return;
-          this.state.post={...this.state.post,captureBudget:{...value}};this.publish();await this.flush();
+          const nextBudget=previous?{
+            ...value,
+            durationMs:Math.max(previous.durationMs,value.durationMs),
+            maxRounds:Math.max(previous.maxRounds,value.maxRounds),
+            displayedCommentCount:previous.displayedCommentCount===null?value.displayedCommentCount:value.displayedCommentCount===null?previous.displayedCommentCount:Math.max(previous.displayedCommentCount,value.displayedCommentCount),
+          }:value;
+          this.state.post={...this.state.post,captureBudget:{...nextBudget}};
+          // As the capture budget grows, extend the per-post watchdog as well; reserve separate time for AI analysis.
+          this.startPostClock();this.publish();await this.flush();
         },post:this.state.post,captured:keys=>checkpoint('captured',keys),completed:()=>checkpoint('completed'),partial:keys=>checkpoint('partial',keys),event:name=>{if(!signal.aborted&&this.state.index===processingIndex)this.publish(name,'process');}});
         // Persist successful processing BEFORE any fallible page check or next navigation.
         this.live();if(!this.isTerminalPost())await checkpoint('completed');

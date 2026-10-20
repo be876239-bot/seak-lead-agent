@@ -20,6 +20,7 @@ type Props<TViewId extends string> = {
   onRefresh: () => Promise<OnboardingReadiness>;
   onNavigate: (viewId: TViewId) => void;
   onComplete: (stepId: OnboardingStepId) => void;
+  onDismiss: () => void;
 };
 
 export default function OnboardingGuide<TViewId extends string,>({
@@ -32,6 +33,7 @@ export default function OnboardingGuide<TViewId extends string,>({
   onRefresh,
   onNavigate,
   onComplete,
+  onDismiss,
 }: Props<TViewId>) {
   const [hint, setHint] = useState('');
   const stepId = state?.status === 'in_progress' ? currentOnboardingStep(state) : null;
@@ -40,7 +42,10 @@ export default function OnboardingGuide<TViewId extends string,>({
   if (!state) {
     return (
       <section className="sl-onboarding sl-onboarding--welcome" aria-labelledby="sl-onboarding-title">
-        <div className="sl-onboarding__eyebrow">快速上手 · 约 3 分钟</div>
+        <div className="sl-onboarding__topline">
+          <span className="sl-onboarding__eyebrow">快速上手 · 约 3 分钟</span>
+          <button type="button" className="sl-onboarding__close" aria-label="关闭新手引导" title="关闭新手引导" onClick={onDismiss}>×</button>
+        </div>
         <h2 id="sl-onboarding-title">第一次使用觅客 Agent？</h2>
         <p>跟着几个小步骤完成配置、搜索和查看线索。你可以随时暂停，关闭侧边栏后也能继续。</p>
         <div className="sl-onboarding__actions">
@@ -56,8 +61,12 @@ export default function OnboardingGuide<TViewId extends string,>({
   if (state.status === 'paused') {
     return (
       <section className="sl-onboarding sl-onboarding--paused" aria-label="新手引导已暂停">
-        <div>
+        <div className="sl-onboarding__topline">
           <b>新手引导已暂停</b>
+          <button type="button" className="sl-onboarding__close" aria-label="关闭新手引导" title="关闭新手引导" onClick={onDismiss}>×</button>
+        </div>
+        <div>
+
           <p>进度已保存在本机。继续时会从上次未完成的步骤开始。</p>
         </div>
         <div className="sl-onboarding__actions">
@@ -138,6 +147,7 @@ export default function OnboardingGuide<TViewId extends string,>({
       <div className="sl-onboarding__topline">
         <span className="sl-onboarding__eyebrow">新手引导</span>
         <span className="sl-onboarding__count">第 {progress} / {totalSteps} 步</span>
+        <button type="button" className="sl-onboarding__close" aria-label="关闭新手引导" title="关闭新手引导" onClick={onDismiss}>×</button>
       </div>
       <div className="sl-onboarding__progress" aria-label={`已完成 ${state.completedStepIds.length} / ${totalSteps} 步`}>
         <span style={{ width: `${state.completedStepIds.length / totalSteps * 100}%` }} />

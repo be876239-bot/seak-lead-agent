@@ -123,9 +123,9 @@ it('A 滚动超过半屏就跳过21–24的虚拟列表，实际小步重叠可�
 it('B 底部14秒时DOM仍变化会重置安静期，22秒到达的评论被保留',async()=>{
  const r=await captureNote(7,{autoLoad:true,onDelta:persist,wait:async()=>{await tick();if(clock===14000)list().insertAdjacentHTML('beforeend','<span>加载进度变化（合成）</span>');if(clock===22000)list().insertAdjacentHTML('beforeend',item(21));}});expect(r.comments).toHaveLength(21);expect(clock).toBeGreaterThanOrEqual(37000);
 });
-it('B 加载标志不消失也必须受单帖3分钟硬上限控制',async()=>{
+it('B 加载标志不消失也必须受单帖5分钟基础预算控制',async()=>{
  document.querySelector('.comments-el')!.setAttribute('aria-busy','true');const now=vi.spyOn(Date,'now').mockImplementation(()=>clock);
- try{const r=await captureNote(7,{autoLoad:true,onDelta:persist,wait:tick});expect(r.stopReason).toBe('time_limit');expect(clock).toBeGreaterThanOrEqual(180000);expect(scroll.mock.calls.length).toBeLessThan(200);}finally{now.mockRestore();}
+ try{const r=await captureNote(7,{autoLoad:true,onDelta:persist,wait:tick});expect(r.stopReason).toBe('time_limit');expect(clock).toBeGreaterThanOrEqual(300000);expect(scroll.mock.calls.length).toBeLessThan(200);}finally{now.mockRestore();}
 });
 it('B 内层不足一屏的overflow容器不能冒充实际外层滚动容器已到底',async()=>{
  list().style.overflowY='auto';Object.defineProperties(list(),{clientHeight:{value:50},scrollHeight:{value:50}});

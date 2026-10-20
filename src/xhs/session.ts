@@ -81,6 +81,18 @@ export class XhsSessionManager {
     switch (req.type) {
       case 'XHS_GET_STATUS': return this.status();
       case 'XHS_DISCOVER': return { urls: readSearchNotes(this.getDoc(), this.getDoc().URL, req.payload.maxPosts), sourceUrl:this.getDoc().URL };
+      case 'XHS_RESEARCH_READ_NOTE': {
+        const doc = this.getDoc();
+        const blocked = platformBlock(doc);
+        if (detectPage(doc) === 'blocked' || blocked) throw new AppError('PAGE_BLOCKED', blocked ?? '页面被登录或风控遮挡，已停止读取');
+        if (detectPage(doc) !== 'note') throw new AppError('PAGE_UNSUPPORTED', '请先在小红书打开一篇相关笔记详情，再点击“读取当前笔记信息”');
+        const parsed = parseNote(doc);
+        return {
+          url: parsed.sourceUrl.slice(0, LIMITS.maxUrlChars),
+          title: redactText(parsed.title).slice(0, 300),
+          excerpt: redactText(parsed.bodyExcerpt).slice(0, 12000),
+        };
+      }
       case 'XHS_SEARCH_STATE': return searchState(this.getDoc());
       case 'XHS_CLOSE_NOTE': return closeNote(this.getDoc(),req.payload.expectedNoteKey);
       case 'XHS_CLICK_NOTE': return clickSearchNote(this.getDoc(),req.payload.expectedSearchUrl,req.payload.expectedNoteKey);

@@ -3,7 +3,7 @@ import { RequestSchema, buildError, buildOk, type Request } from '../src/messagi
 import { toErrorPayload } from '../src/domain/errors';
 import { XhsSessionManager } from '../src/xhs/session';
 
-const XHS_TYPES = new Set(['XHS_CLICK_NOTE', 'XHS_CLOSE_NOTE', 'XHS_SEARCH_STATE', 'XHS_SCROLL_SEARCH', 'XHS_DISCOVER', 'XHS_GUARD', 'XHS_GET_STATUS', 'XHS_START_SESSION', 'XHS_GET_SNAPSHOT', 'XHS_STOP_SESSION']);
+const XHS_TYPES = new Set(['XHS_CLICK_NOTE', 'XHS_CLOSE_NOTE', 'XHS_SEARCH_STATE', 'XHS_SCROLL_SEARCH', 'XHS_DISCOVER', 'XHS_GUARD', 'XHS_GET_STATUS', 'XHS_START_SESSION', 'XHS_GET_SNAPSHOT', 'XHS_STOP_SESSION', 'XHS_RESEARCH_READ_NOTE']);
 
 export default defineContentScript({
   matches: ['https://www.xiaohongshu.com/*'],

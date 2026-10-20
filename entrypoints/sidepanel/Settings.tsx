@@ -45,8 +45,8 @@ function RetentionSection() {
   };
 
   return (
-    <section className="sl-card" style={{ display: 'grid', gap: 6 }}>
-      <h2 style={{ fontSize: 14, margin: 0 }}>数据保留期</h2>
+    <details className="sl-card sl-stack sl-settings-disclosure">
+      <summary>数据保留期</summary>
       <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
         <select value={days} onChange={(e) => void save(Number(e.target.value))}>
           {RETENTION_CHOICES.map((d) => <option key={d} value={d}>{d} 天</option>)}
@@ -55,7 +55,7 @@ function RetentionSection() {
       </div>
       <p style={{ color: '#888', margin: 0, fontSize: 12 }}>清理只在启动与每日首次使用自动进行；取消清理不会改动数据。</p>
       <p role="status" style={{ margin: 0, color: '#07c' }}>{msg}</p>
-    </section>
+    </details>
   );
 }
 
@@ -86,10 +86,15 @@ function UsageSection() {
 
   const cny = estimateCny(summary, price);
   return (
-    <section className="sl-card" style={{ display: 'grid', gap: 6 }}>
-      <h2 style={{ fontSize: 14, margin: 0 }}>模型用量（本机累计）</h2>
-      <p style={{ margin: 0 }}>
-        调用 {summary.calls} 次：成功 {summary.success}、失败 {summary.failed}、结果未知 {summary.unknown}。
+    <details className="sl-card sl-stack sl-settings-disclosure">
+      <summary>模型用量（本机累计）</summary>
+      <div className="sl-usage-metrics">
+        <div><strong>{summary.calls}</strong><span>调用</span></div>
+        <div><strong>{summary.success}</strong><span>成功</span></div>
+        <div><strong>{summary.failed}</strong><span>失败</span></div>
+        <div><strong>{summary.unknown}</strong><span>结果未知</span></div>
+      </div>
+      <p className="sl-usage-detail">
         {summary.inputTokens === null
           ? ' Token 用量：供应商未回报，明确未知（不以字符数冒充）。'
           : ` Token：输入 ${summary.inputTokens}、输出 ${summary.outputTokens}。`}
@@ -104,7 +109,7 @@ function UsageSection() {
         <button onClick={() => void savePrice()}>保存单价</button>
       </div>
       {price && <p style={{ color: '#888', margin: 0, fontSize: 12 }}>当前核验：输入 {price.inputPerMTokens} / 输出 {price.outputPerMTokens} ¥/百万token（{price.verifiedAt}）</p>}
-    </section>
+    </details>
   );
 }
 
@@ -131,10 +136,10 @@ export default function Settings() {
   }, []);
 
   return (
-    <div className="sl-page sl-settings-page" style={{ display: 'grid', gap: 16, fontSize: 13 }}>
-      <h2>设置</h2>
-      <section className="sl-card" style={{ display: 'grid', gap: 8 }}>
-        <h2 style={{ fontSize: 14, margin: 0 }}>模型与 Key</h2>
+    <div className="sl-page sl-settings-page">
+      <div className="sl-page-heading"><h2>设置</h2><span>配置与本机数据</span></div>
+      <section className="sl-card sl-stack sl-model-settings">
+        <h2>模型与 Key</h2>
         <p style={{ margin: 0 }}>{PROVIDER_PRESETS[presetId].label}</p>
         <label>
           Base URL
@@ -156,16 +161,11 @@ export default function Settings() {
           <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
           在此浏览器记住 Key（不勾选则仅当前会话有效）
         </label>
-        <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-          <input
-            type="checkbox" checked={logPanel}
-            onChange={(e) => { setLogPanel(e.target.checked); void setLogPanelEnabled(e.target.checked); }}
-          />
-          在产品页与当前笔记页显示任务日志框（默认关闭；只记录步骤、进度与错误码，不含评论正文和 Key）
-        </label>
-        <div style={{ display: 'flex', gap: 8 }}>
+
+        <div className="sl-actions">
           <button
-            data-onboarding-target="model-save" className="sl-button--primary"
+            className="sl-button--primary"
+            data-onboarding-target="model-save"
             onClick={async () => {
               if (!apiKey.trim()) { setStatus('请先输入 Key'); return; }
               try {
@@ -178,7 +178,7 @@ export default function Settings() {
           >
             保存
           </button>
-          <button
+          <button className="sl-button--danger"
             onClick={async () => {
               try {
                 await clearCredential();
@@ -219,16 +219,25 @@ export default function Settings() {
             连接测试
           </button>
         </div>
-        <p role="status" style={{ margin: 0 }}>{status}</p>
+        <p role="status" className="sl-notice sl-notice--info">{status}</p>
         <p style={{ color: '#888', margin: 0 }}>Key 绝不进入同步存储、数据库、导出文件或日志。</p>
       </section>
 
-      <RetentionSection />
       <UsageSection />
+      <details className="sl-card sl-stack sl-settings-disclosure"><summary>任务日志</summary>
+        <label className="sl-check-row">
+          <input
+            type="checkbox" checked={logPanel}
+            onChange={(e) => { setLogPanel(e.target.checked); void setLogPanelEnabled(e.target.checked); }}
+          />
+          在产品页与寻找客户页显示任务日志框（默认关闭；只记录步骤、进度与错误码，不含评论正文和 Key）
+        </label>
+      </details>
+      <RetentionSection />
 
-      <section style={{ display: 'grid', gap: 6 }}>
-        <h2 style={{ fontSize: 14, margin: 0 }}>业务数据</h2>
-        <button
+      <details className="sl-card sl-stack sl-settings-disclosure">
+        <summary>业务数据</summary>
+        <button className="sl-button--danger"
           onClick={async () => {
             if (!window.confirm('删除全部产品、笔记快照、评论、线索、纠正与任务记录？不可撤销（不影响 API Key）。')) return;
             if (await hasActiveJobs(getDb())) { setStatus('存在进行中的任务：请先取消'); return; }
@@ -240,7 +249,8 @@ export default function Settings() {
           清除全部业务数据
         </button>
         <p style={{ color: '#888', margin: 0, fontSize: 12 }}>“清除 Key”只删凭据；“清除业务数据”只删本地数据，两者互不影响。</p>
-      </section>
+      </details>
+      <section className="sl-about"><b>觅客 Agent</b><span>版本 {browser.runtime.getManifest().version} · 本地优先</span><p>从公开评论发现潜在客户，由你决定是否联系。遇平台验证会暂停。</p></section>
     </div>
   );
 }

@@ -69,7 +69,7 @@ it.each(['normal','captured-live','completed-live','captured-restored','complete
    const children=(await db.jobs.toArray()).filter(j=>j.kind==='comments');
    expect(children).toHaveLength(2);expect(children.every(j=>j.status==='partial'&&j.errorCode==='INCOMPLETE_CAPTURE')).toBe(true);
    expect(children.every(j=>j.collection?.countStatus==='below_displayed_total')).toBe(true);
-   expect(children.every(j=>j.collection?.budget?.durationMs===900000)).toBe(true);
+   expect(children.every(j=>j.collection?.budget?.durationMs===4500000)).toBe(true);
    return;
  }
  if(mode!=='normal') {

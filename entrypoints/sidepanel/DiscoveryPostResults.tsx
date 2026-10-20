@@ -46,19 +46,24 @@ function PostLeadCard({ view, product, onToggleHandled }: {
   const stale = view.analysis.profileVersion !== product.profileVersion;
   const badge = needsTargetBadge(view.analysis.decision);
   return (
-    <article className="sl-card" style={{ fontSize: 12 }}>
-      <div style={{ color: '#666' }}>
-        {view.comment.authorDisplayName ?? '（页面无昵称）'}
-        {view.comment.locationText ? ` · ${view.comment.locationText}` : ''}
-      </div>
+    <details className="sl-card sl-lead-card" data-group={view.group} data-handled={view.handled}>
+      <summary className="sl-lead-summary">
+        <span className="sl-lead-summary__meta">
+          <span className="sl-badge" data-group={view.group}>{GROUP_TITLES[view.group]}</span>
+          <span className="sl-badge">{view.handled ? '已处理' : '未处理'}</span>
+        </span>
+        <b>{view.analysis.decision.needSummary}</b>
+        <span className="sl-lead-summary__intent">
+          {view.comment.authorDisplayName ?? '（页面无昵称）'}{view.comment.locationText ? ` · ${view.comment.locationText}` : ''} · 意向：{intentShortCn(view.analysis.decision)}
+        </span>
+      </summary>
       {!view.comment.parentKey && !view.comment.isReply && <div style={{ color: '#444' }}>{view.comment.text}</div>}
       <div style={{ marginTop: 4 }}>
-        <b>{view.analysis.decision.needSummary}</b>
-        <span style={{ color: '#777', marginLeft: 6 }}>意向：{intentShortCn(view.analysis.decision)}</span>
+        <span style={{ color: '#777', marginLeft: 0 }}>意向：{intentShortCn(view.analysis.decision)}</span>
         {badge === 'competitor' && <span style={{ color: '#b60', marginLeft: 6 }}>（指向竞品，并非本产品）</span>}
       </div>
       {view.analysis.decision.evidence.length > 0 && (
-        <div style={{ color: '#777' }}>证据：{view.analysis.decision.evidence.map((e) => e.quote).join(' / ')}</div>
+        <div className="sl-evidence">证据：{view.analysis.decision.evidence.map((e) => e.quote).join(' / ')}</div>
       )}
       <LeadExplanation decision={view.analysis.decision} profileUrl={view.comment.profileUrl} comment={view.comment} parentComment={view.parentComment} />
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 4, flexWrap: 'wrap' }}>
@@ -70,7 +75,7 @@ function PostLeadCard({ view, product, onToggleHandled }: {
           <input type="checkbox" checked={view.handled} onChange={() => onToggleHandled(view)} />已处理
         </label>
       </div>
-    </article>
+    </details>
   );
 }
 

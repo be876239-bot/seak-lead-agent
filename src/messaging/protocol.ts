@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { ERROR_CODES, type ErrorCode } from '../domain/errors';
 import { ReplyLoadWarningsSchema, BatchSchema, CommentSchema, JobSchema, NoteSchema, ProductSourceBlockSchema } from '../domain/schemas';
+import { ResearchInputSchema } from '../product/research';
 import { LIMITS } from '../domain/limits';
 
 export const PROTOCOL_VERSION = 1;
@@ -15,6 +16,8 @@ export const MessageType = z.enum([
   'PRODUCT_READ_RENDERED',
   'PRODUCT_CANCEL_READ',
   'PRODUCT_CREATE',
+  'PRODUCT_RESEARCH_CREATE',
+  'XHS_RESEARCH_READ_NOTE',
   'NOTE_ANALYZE',
   'JOB_GET',
   'JOB_CANCEL',
@@ -61,6 +64,14 @@ export const RequestSchema = z.discriminatedUnion('type', [
       jobId: z.string().uuid(), url: z.string().url().max(LIMITS.maxUrlChars),
       existingProductId: z.string().uuid().optional(),
     }),
+  }),
+  z.object({
+    protocol: z.literal(PROTOCOL_VERSION), requestId: RequestId, type: z.literal('PRODUCT_RESEARCH_CREATE'),
+    payload: z.object({ jobId: z.string().uuid(), input: ResearchInputSchema }),
+  }),
+  z.object({
+    protocol: z.literal(PROTOCOL_VERSION), requestId: RequestId, type: z.literal('XHS_RESEARCH_READ_NOTE'),
+    payload: z.object({}),
   }),
   z.object({
     protocol: z.literal(PROTOCOL_VERSION), requestId: RequestId, type: z.literal('NOTE_ANALYZE'),

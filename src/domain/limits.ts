@@ -38,12 +38,17 @@ export const LIMITS = {
   captureIdleRounds: 4,
   captureQuietMs: 15_000,
   captureMaxRounds: 200,
-  captureMaxDurationMs: 180_000, // D021 基础预算，实际按评论数动态增长
-  captureHardDurationMs: 900_000,
-  captureHardRounds: 1000,
-  captureMsPerComment: 1800,
+  // D028：每100条评论分配5分钟采集时间；保留旧检查点最小值以兼容D021任务。
+  captureMinimumStoredDurationMs: 180_000,
+  captureMaxDurationMs: 300_000,
+  captureHardDurationMs: 6_000_000,
+  captureHardRounds: 4_000,
+  captureMsPerComment: 3_000,
   captureExtensionIntervalMs: 60_000,
+  // 无预算信息时的单篇保护；实际总时限随采集预算动态增长。
   discoveryPostTimeoutMs: 30 * 60_000,
+  discoveryPostAnalysisGraceMs: 30 * 60_000,
+  discoveryPostHardTimeoutMs: 130 * 60_000,
   lockRenewIntervalMs: 5_000,
   lockTtlMs: 60_000,
   minStaticTextChars: 200,

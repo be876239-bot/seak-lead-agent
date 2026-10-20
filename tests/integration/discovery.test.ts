@@ -1,6 +1,6 @@
 import {readFileSync} from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
-import { SerialDiscovery, type DiscoveryDeps } from '../../src/discovery/serial';
+import { SerialDiscovery, type DiscoveryDeps, type DiscoveryState } from '../../src/discovery/serial';
 import { LIMITS } from '../../src/domain/limits';
 import { readSearchNotes, platformBlock, noteKeyFromUrl, noteUrl } from '../../src/xhs/discovery-dom';
 
@@ -96,6 +96,21 @@ it('single-post timeout pauses in-flight work without a task-wide cutoff',async(
  const {task,deps}=setup({postTimeoutMs:1000,process:async(_u,signal)=>new Promise<void>(resolve=>signal.addEventListener('abort',()=>resolve(),{once:true}))});
  const pending=task.run();await vi.advanceTimersByTimeAsync(1000);await pending;
  expect(task.state.status).toBe('paused');expect(task.state.reason).toContain('主动处理达到');expect(deps.navigate).toHaveBeenCalledTimes(1);
+ }finally{vi.useRealTimers();}
+});
+
+it('单篇整体看门狗随采集预算延长，并为AI分析保留30分钟余量',async()=>{
+ vi.useFakeTimers();try{
+  const captureBudget={noteKey:'note-a',displayedCommentCount:LIMITS.maxSessionComments,elapsedMs:0,rounds:0,durationMs:LIMITS.captureHardDurationMs,maxRounds:LIMITS.captureHardRounds,progressCount:0,lastProgressElapsedMs:0,extensionCount:0,lastExtensionElapsedMs:0};
+  const restored:DiscoveryState={status:'paused',index:0,total:urls.length,comments:0,currentComments:0,leads:0,currentLeads:0,phase:'paused',reason:null,postElapsedMs:0,post:{stage:'capturing',commentKeys:[],captureBudget}};
+  const {deps}=setup({process:async(_u,signal,_progress,checkpoint)=>{
+   await checkpoint.budget(captureBudget);
+   await new Promise<void>(resolve=>signal.addEventListener('abort',()=>resolve(),{once:true}));
+  }});
+  const task=new SerialDiscovery(urls,deps,restored);const pending=task.run();
+  await vi.advanceTimersByTimeAsync(31*60_000);
+  expect(task.state.status).toBe('running');
+  task.pause();await pending;expect(task.state.status).toBe('paused');
  }finally{vi.useRealTimers();}
 });
 it('restored task preserves per-post elapsed time and aggregate counts',async()=>{

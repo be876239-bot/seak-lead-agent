@@ -13,7 +13,7 @@ export const CAPTURE_STOP_LABELS: Record<NonNullable<CaptureProgress['stopReason
 
 export default function CollectionProgressView({ progress }: { progress: CaptureProgress }) {
   return (
-    <div className="sl-collection-progress" role="status" style={{ fontSize: 12, padding: 8, background: '#f0f7ff', overflowWrap: 'anywhere' }}>
+    <div className="sl-collection-progress" role="status">
       <div>已发现 {progress.discoveredCount} 条 · 本轮新增 {progress.addedCount} 条</div>
       {progress.topLevelCount!==undefined && progress.replyCount!==undefined && <div>一级评论：{progress.topLevelCount} · 回复：{progress.replyCount}</div>}
       {!!progress.unresolvedReplyCount && <div>有 {progress.unresolvedReplyCount} 条回复缺少父评论上下文；已保存，不阻塞采集。</div>}

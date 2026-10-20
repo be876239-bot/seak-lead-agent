@@ -1,104 +1,23 @@
-/* Presentation-only styles. The onboarding engine and adapter do not depend on these classes. */
-.sl-onboarding {
-  display: grid;
-  gap: 8px;
-  min-width: 0;
-  margin: 0 0 12px;
-  padding: 12px;
-  border: 1px solid #d6e4f6;
-  border-radius: 12px;
-  background: linear-gradient(145deg, #f5f9ff 0%, #fff 72%);
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.035);
-}
-.sl-onboarding--welcome { border-left: 3px solid var(--sl-primary, #2563eb); }
-.sl-onboarding--paused {
-  grid-template-columns: minmax(0, 1fr);
-  border-color: var(--sl-border, #dbe2ea);
-  background: #fff;
-}
-.sl-onboarding__eyebrow {
-  color: #1d4ed8;
-  font-size: 10px;
-  font-weight: 750;
-  letter-spacing: .04em;
-  text-transform: uppercase;
-}
-.sl-onboarding h2 {
-  margin: 0;
-  color: #17365f;
-  font-size: 14px;
-  font-weight: 750;
-  line-height: 1.4;
-}
-.sl-onboarding p {
-  margin: 0;
-  color: #526174;
-  font-size: 12px;
-  line-height: 1.55;
-}
-.sl-onboarding__topline {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-.sl-onboarding__count {
-  flex: 0 0 auto;
-  color: #64748b;
-  font-size: 10px;
-  font-weight: 650;
-  font-variant-numeric: tabular-nums;
-}
-.sl-onboarding__progress {
-  width: 100%;
-  height: 4px;
-  overflow: hidden;
-  border-radius: 99px;
-  background: #e7edf6;
-}
-.sl-onboarding__progress > span {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: var(--sl-primary, #2563eb);
-  transition: width 160ms ease;
-}
-.sl-onboarding__location {
-  padding: 7px 9px;
-  border-radius: 7px;
-  background: #fff;
-  color: #475569 !important;
-}
-.sl-onboarding__hint {
-  padding: 7px 9px;
-  border: 1px solid #dbeafe;
-  border-radius: 7px;
-  background: #fff;
-}
-.sl-onboarding__actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-}
+/* Onboarding shares the original concept's compact cards and blue/yellow accents.
+   Engine state, target attributes and navigation are unchanged. */
+.sl-onboarding { display: grid; gap: 8px; margin-bottom: 14px; padding: 12px; border: 1px solid var(--sl-border,#e3ded1); border-radius: 12px; background: #fff; font-size: 12px; }
+.sl-onboarding--welcome { border-left: 3px solid var(--sl-primary,#3b5bc9); }
+.sl-onboarding--active { border-top: 3px solid var(--sl-yellow,#ffc64f); }
+.sl-onboarding--paused { background: #faf9f5; }
+.sl-onboarding h2 { margin: 0; font-size: 14px; color: var(--sl-text,#20211f); }
+.sl-onboarding p { margin: 0; color: var(--sl-muted,#62645d); font-size: 12px; line-height: 1.65; }
+.sl-onboarding__eyebrow { color: var(--sl-primary,#3b5bc9); font-size: 10px; font-weight: 650; }
+.sl-onboarding__topline { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 4px 8px; }
+.sl-onboarding__count { color: var(--sl-muted,#62645d); font-size: 10px; font-variant-numeric: tabular-nums; margin-left: auto; }
+.sl-onboarding__close { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 24px; width: 24px; height: 24px; padding: 0; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--sl-muted,#62645d); font-size: 20px; line-height: 1; cursor: pointer; }
+.sl-onboarding__close:hover { border-color: var(--sl-border,#e3ded1); background: #f5f4ed; color: var(--sl-text,#20211f); }
+.sl-onboarding__close:focus-visible { outline: 2px solid var(--sl-focus,#5877e4); outline-offset: 2px; }
+.sl-onboarding__progress { height: 4px; overflow: hidden; border-radius: 99px; background: #eeece3; }
+.sl-onboarding__progress > span { display: block; height: 100%; border-radius: inherit; background: var(--sl-primary,#3b5bc9); transition: width 160ms ease; }
+.sl-onboarding__location, .sl-onboarding__hint { padding: 8px; background: #f5f4ed; border-radius: 6px; font-size: 11px; }
+.sl-onboarding__actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .sl-onboarding__actions button { flex: 0 1 auto; }
-.sl-onboarding__actions .sl-button--primary { min-width: 112px; }
 .sl-onboarding__paused p { margin-top: 3px; }
-[data-onboarding-target]:focus-visible {
-  outline: 2px solid var(--sl-focus, #2563eb);
-  outline-offset: 3px;
-  border-radius: 8px;
-}
-[data-onboarding-highlighted="true"] {
-  outline: 2px solid var(--sl-primary, #2563eb);
-  outline-offset: 3px;
-  border-radius: 8px;
-  box-shadow: 0 0 0 5px rgba(37, 99, 235, 0.18);
-  position: relative;
-  z-index: 1;
-  transition: outline-color 160ms ease, box-shadow 160ms ease;
-}
-@media (max-width: 360px) {
-  .sl-onboarding { padding: 10px; }
-  .sl-onboarding__actions button { flex: 1 1 auto; }
-}
+[data-onboarding-target]:focus-visible { outline: 2px solid var(--sl-focus,#5877e4); outline-offset: 3px; border-radius: 8px; }
+[data-onboarding-highlighted="true"] { outline: 2px solid var(--sl-primary,#3b5bc9); outline-offset: 3px; border-radius: 8px; box-shadow: 0 0 0 5px rgb(59 91 201 / .16); position: relative; z-index: 1; }
+@media (max-width:360px) { .sl-onboarding { padding: 10px; } .sl-onboarding__actions button { flex: 1 1 auto; } }

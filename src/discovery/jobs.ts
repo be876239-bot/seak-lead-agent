@@ -4,6 +4,7 @@ import { analysisRepos, baseJob, makeDeps } from '../analysis/jobs';
 import { runCommentsJob } from '../analysis/runner';
 import { COMMENT_PROMPT_VERSION } from '../ai/prompts';
 import { AppError, toErrorPayload } from '../domain/errors';
+import { requireConfirmedProduct } from '../product/research';
 import { LIMITS } from '../domain/limits';
 import { registerSensitiveHandler } from '../messaging/handlers';
 import { buildRequest } from '../messaging/protocol';
@@ -163,7 +164,9 @@ export function registerDiscoveryHandlers() {
     try {
       const {jobId,productId,tabId,direction,maxPosts}=req.payload;
       const product=await analysisRepos.getProduct(productId);
-      if(!product || !product.profile.searchSuggestions.includes(direction))throw new AppError('PAGE_CHANGED','请选择当前产品画像中的搜索方向');
+      if(!product) throw new AppError('PAGE_CHANGED','产品不存在，请回到产品页检查。');
+      requireConfirmedProduct(product);
+      if(!product.profile.searchSuggestions.includes(direction))throw new AppError('PAGE_CHANGED','请选择当前产品画像中的搜索方向');
       // Starting a new task explicitly means switching away from the previous one.
       // Pause and drain it safely, but keep its checkpoint, comments, and leads in IndexedDB.
       const previous=current;

@@ -2,7 +2,7 @@ import type {
   Analysis, Batch, Comment, Job, Note, Product, ProductProfile, ProductSourceBlock, Usage,
 } from '../domain/schemas';
 import type { ErrorCode as Code } from '../domain/errors';
-import { AppError } from '../domain/errors';
+import { AppError, safeDiagnosticMessage } from '../domain/errors';
 import { contextHash, dedupeComments, hash64 } from '../domain/identity';
 import { RULE_VERSION, groupDecision } from '../domain/classification';
 import { buildCacheKey, CACHE_RULE_VERSION, filterUncached } from './cache';
@@ -60,6 +60,10 @@ async function assertCanCommit(deps: RunnerDeps, handle: LockHandle): Promise<vo
 /** 外显错误摘要：校验类报错正文含引文（评论原文），只保留"："前的说明段；其余 message 均为自撰文案可完整外显。 */
 function safeErrSummary(e: AppError): string {
   return (e.code === 'AI_INVALID_OUTPUT' ? (e.message.split('：')[0] ?? e.code) : e.message).slice(0, 140);
+}
+
+function safeJobErrorMessage(e: AppError): string {
+  return safeDiagnosticMessage(e.code === 'AI_INVALID_OUTPUT' ? safeErrSummary(e) : e.message);
 }
 
 const claimText = (p: ProductProfile): string =>
@@ -403,7 +407,7 @@ export async function runCommentsJob(
   } catch (err) {
     const e = ensureAppError(err);
     const status: Job['status'] = e.code === 'CANCELLED' ? 'cancelled' : 'failed';
-    await deps.repos.updateJob(jobId, { status, errorCode: e.code });
+    await deps.repos.updateJob(jobId, { status, errorCode: e.code, errorMessage: safeJobErrorMessage(e) });
     throw e;
   } finally {
     spec.signal?.removeEventListener('abort',abort);
@@ -478,6 +482,7 @@ export async function runProfileGeneration(
   spec: {
     inputUrl: string; finalUrl: string; blocks: ProductSourceBlock[];
     existingProductId?: string; jobId?: string; log?: (m: string) => void;
+    source?: Product['source']; confirmation?: Product['confirmation'];
   },
 ): Promise<Product> {
   // 在进入模型和业务数据库前统一脱敏；不改写调用方持有的原始输入。
@@ -551,10 +556,15 @@ export async function runProfileGeneration(
     }));
     await assertCanCommit(deps, handle);
     const product = await deps.repos.withOwnedLock(handle, () => spec.existingProductId
-      ? deps.repos.replaceProfile(spec.existingProductId, profile, sourceBlocks)
+      ? deps.repos.replaceProfile(spec.existingProductId, profile, sourceBlocks, {
+          ...(spec.source ? { source: spec.source } : {}),
+          ...(spec.confirmation ? { confirmation: spec.confirmation } : {}),
+        })
       : deps.repos.createProduct({
           inputUrl: spec.inputUrl, finalUrl: spec.finalUrl, profile,
           sourceBlocks, modelId: resp.model, promptVersion: PROFILE_PROMPT_VERSION,
+          ...(spec.source ? { source: spec.source } : {}),
+          ...(spec.confirmation ? { confirmation: spec.confirmation } : {}),
         }));
     await deps.repos.updateJob(jobId, {
       status: 'completed', productId: product.id, profileVersion: product.profileVersion, completedItems: 1,
@@ -563,7 +573,7 @@ export async function runProfileGeneration(
   } catch (err) {
     const e = ensureAppError(err);
     const status: Job['status'] = e.code === 'CANCELLED' ? 'cancelled' : e.code === 'LOCK_HELD' ? 'interrupted' : 'failed';
-    await deps.repos.updateJob(jobId, { status, errorCode: e.code, failedItems: 1 });
+    await deps.repos.updateJob(jobId, { status, errorCode: e.code, errorMessage: safeJobErrorMessage(e), failedItems: 1 });
     throw e;
   } finally {
     if (handle) await deps.lock.release(handle);
